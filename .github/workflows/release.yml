@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag like v1.2.0 runs the tests, then builds SelfFound-v1.2.0.zip
+# Pushing a tag like v1.2.0 runs the tests, then builds EarnedSelfFound-v1.2.0.zip
 # (version stamped into the TOC) and publishes it as a GitHub release.
 # CurseForge / Wago uploads switch on automatically once their project IDs
 # are in the TOC (X-Curse-Project-ID / X-Wago-ID) and the matching secrets

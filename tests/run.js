@@ -28,7 +28,7 @@ lualib.luaL_openlibs(L);
 const addonDir = path.resolve(process.argv[2] || path.join(__dirname, '..')).replace(/\\/g, '/');
 lua.lua_pushstring(L, to_luastring(addonDir));
 lua.lua_setglobal(L, to_luastring('ADDON_DIR'));
-lua.lua_pushstring(L, to_luastring(fs.readFileSync(path.join(addonDir, 'SelfFound.toc'), 'utf8')));
+lua.lua_pushstring(L, to_luastring(fs.readFileSync(path.join(addonDir, 'EarnedSelfFound.toc'), 'utf8')));
 lua.lua_setglobal(L, to_luastring('TOC_SOURCE'));
 lua.lua_pushstring(L, to_luastring(ref));
 lua.lua_setglobal(L, to_luastring('REF_SOURCE'));

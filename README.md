@@ -130,10 +130,10 @@ run, e.g. **CLEAN · Well witnessed**:
 
 ## Install
 
-1. Download the latest `SelfFound-vX.Y.Z.zip` from
+1. Download the latest `EarnedSelfFound-vX.Y.Z.zip` from
    [Releases](https://github.com/sanredz/Earned-Self-Found/releases).
 2. Extract it into `World of Warcraft\_classic_beta_\Interface\AddOns\`. You
-   should end up with an `AddOns\SelfFound` folder.
+   should end up with an `AddOns\EarnedSelfFound` folder.
 3. Install it **before** you start the character. A run that starts later is
    marked Unverified.
 
@@ -174,7 +174,7 @@ harder that is to hide, which is why every recovery shows who confirmed it.
 ## Development
 
 ```
-SelfFound.toc        Addon manifest (load order, saved variables)
+EarnedSelfFound.toc  Addon manifest (load order, saved variables)
 Core.lua             Namespace, events, formatting, serializer and checksum
 Ledger.lua           Saved run data, the chained log, seal and run status
 Tracker.lua          Gold, items, kills, quests, deaths, play time, net worth
@@ -196,7 +196,7 @@ npm install
 powershell -ExecutionPolicy Bypass -File scripts\link-addon.ps1
 ```
 
-The script links `Interface\AddOns\SelfFound` to this repo. Edit files here,
+The script links `Interface\AddOns\EarnedSelfFound` to this repo. Edit files here,
 then `/reload` in game.
 
 **Tests:** `npm test` runs a Lua 5.1 syntax check and a simulation of the
@@ -209,7 +209,7 @@ addon against stubbed WoW APIs, covering:
 CI runs the same tests on every push.
 
 **Compatibility, don't break these:**
-- the folder, TOC and saved variable names (`SelfFound`, `SelfFoundDB`,
+- the folder and TOC name (`EarnedSelfFound`) and saved variable names (`SelfFoundDB`,
   `SelfFoundCharDB`)
 - the addon message prefix `SelfFound` and the `H1`/`A1` heartbeat format
 - the report format (`SF1:`)
@@ -228,7 +228,7 @@ other. If one must change, bump the MAJOR version and migrate.
    git push origin main --tags
    ```
 3. GitHub Actions runs the tests, stamps the version into the TOC, and
-   publishes `SelfFound-v1.1.0.zip` as a GitHub release.
+   publishes `EarnedSelfFound-v1.1.0.zip` as a GitHub release.
 
 To also publish to CurseForge or Wago:
 1. Add `## X-Curse-Project-ID:` / `## X-Wago-ID:` to the TOC.

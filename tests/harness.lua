@@ -3,6 +3,9 @@
 -- `npm test`. Globals ADDON_DIR, TOC_SOURCE and REF_SOURCE
 -- are set by run.js.
 
+-- The addon's folder name (what WoW passes as the addon name).
+ADDON_NAME = "EarnedSelfFound"
+
 -- Load files in TOC order, exactly like the game.
 local FILES, TOC_VERSION = {}, nil
 for line in (TOC_SOURCE .. "\n"):gmatch("(.-)\r?\n") do
@@ -212,7 +215,7 @@ local function InstallStubs()
 	_G.UnitLevel = function() return W.level end
 	_G.UnitIsPlayer = function() return true end
 	_G.UnitIsUnit = function(a, b) return a == b end
-	_G.C_AddOns = { GetAddOnMetadata = function(addon, field) if addon == "SelfFound" and field == "Version" then return W.tocVersion or TOC_VERSION end end }
+	_G.C_AddOns = { GetAddOnMetadata = function(addon, field) if addon == ADDON_NAME and field == "Version" then return W.tocVersion or TOC_VERSION end end }
 	_G.GetRealmName = function() return "Test Realm" end
 	_G.GetNormalizedRealmName = function() return "TestRealm" end
 	_G.GetMoney = function() return W.money end
@@ -354,11 +357,11 @@ local function Boot(saved, opts)
 	SF = {}
 	for _, file in ipairs(FILES) do
 		local chunk = assert(loadfile(ADDON_DIR .. "/" .. file))
-		chunk("SelfFound", SF)
+		chunk(ADDON_NAME, SF)
 	end
 	if opts.coreOnly then return SF end
 	W.loadClock = W.clock
-	Fire("ADDON_LOADED", "SelfFound")
+	Fire("ADDON_LOADED", ADDON_NAME)
 	Fire("PLAYER_LOGIN")
 	Fire("PLAYER_ENTERING_WORLD", true, false)
 	W.playedRequested = false
