@@ -29,7 +29,10 @@ run, and lets other players vouch for it.
   auction house visits.
 - **Event log:** a checksum-chained history of your run.
 - **Witnesses:** players running the addon in your guild or group
-  automatically record each other's progress.
+  automatically record each other's progress. Sharing is always on, so a run
+  can't quietly go dark. Only your status, level, played time, deaths, quest
+  count, class and number of violations are shared, and only with guild and
+  group members running the addon.
 - **Share and verify:** export a report anyone can paste into Verify, which
   checks it against their own witness records.
 

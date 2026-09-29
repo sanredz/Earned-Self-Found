@@ -663,32 +663,29 @@ local function BuildWitnesses(page)
 	settings:SetPoint("TOPLEFT", 4, -2)
 	settings:SetPoint("TOPRIGHT", -4, -2)
 	settings:SetHeight(54)
-	local broadcast = Checkbox(settings, "Share my progress with guild and group members", function()
-		return SF.settings.broadcast
-	end, function(v)
-		SF.settings.broadcast = v
-		if v then
-			SF.Broadcast(true)
-		end
-	end)
-	broadcast:SetPoint("TOPLEFT", 4, -2)
+	-- Progress is always shared (no opt-out): a run that could go quiet
+	-- while breaking a rule would make witnessing meaningless.
 	local tooltips = Checkbox(settings, "Show self-found status in player tooltips", function()
 		return SF.settings.tooltips
 	end, function(v)
 		SF.settings.tooltips = v
 	end)
-	tooltips:SetPoint("TOPLEFT", 4, -26)
+	tooltips:SetPoint("TOPLEFT", 4, -2)
 	local warnings = Checkbox(settings, "Warn me when a trade, auction, or mail window opens", function()
 		return SF.settings.warnings
 	end, function(v)
 		SF.settings.warnings = v
 	end)
-	warnings:SetPoint("TOPLEFT", 344, -2)
+	warnings:SetPoint("TOPLEFT", 4, -26)
 	local now = Button(settings, "Broadcast now", 130, function()
 		SF.Broadcast(true)
 		SF.Print("Sent your progress to guild and group members running " .. SF.NAME .. ".")
 	end)
-	now:SetPoint("TOPLEFT", 348, -28)
+	now:SetPoint("TOPRIGHT", -8, -14)
+	now:SetScript("OnEnter", function(self)
+		Tooltip(self, "Broadcast now", { "Your progress is shared automatically every few minutes with guild and group members running " .. SF.NAME .. ".", "Use this to share it right away, e.g. after joining a group." })
+	end)
+	now:SetScript("OnLeave", HideTooltip)
 
 	local seen = Panel(page, "Players you've witnessed")
 	seen:SetPoint("TOPLEFT", 4, -58)

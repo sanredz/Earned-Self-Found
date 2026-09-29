@@ -85,7 +85,7 @@ end
 local lastBroadcast = -math.huge
 
 function SF.Broadcast(force)
-	if not SF.run or not SF.settings or not SF.settings.broadcast then
+	if not SF.run then
 		return
 	end
 	local now = GetTime()
@@ -166,7 +166,7 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 		SF.run.witnessedBy[sender] = entry
 		SF.Changed()
 		SF.Fire("WitnessChanged")
-	elseif SF.settings.broadcast and (not ackedAt[sender] or time() - ackedAt[sender] > ACK_INTERVAL) then
+	elseif not ackedAt[sender] or time() - ackedAt[sender] > ACK_INTERVAL then
 		-- Acknowledge with our own heartbeat, so both sides witness each other.
 		ackedAt[sender] = time()
 		Send("A1|" .. HeartbeatBody(), "WHISPER", sender)

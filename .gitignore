@@ -1,5 +1,6 @@
-# Private maintainer notes
-MAINTAINING.md
+# Private, local-only notes (maintainer + Claude context)
+CLAUDE.md
+docs/
 
 # Dev dependencies (npm test)
 node_modules/

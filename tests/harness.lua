@@ -558,11 +558,23 @@ check(#c2 == 0, "honest report has no contradictions", c2[1])
 -- ---------------------------------------------------------------------------
 
 Advance(100)
+SelfFoundDB.settings.broadcast = false -- saved by older versions that had an opt-out
 local saved = Logout()
 local headBefore, countBefore = SF.LogHead(), SF.LogCount()
 Advance(5) -- loading screen
 Boot(saved, { played = ServerPlayed() })
 check(SF.integrity.ok, "integrity ok after reload", SF.integrity.chainOk and "seal" or "chain")
+
+-- Sharing is always on, even if an old save had it switched off
+check(SF.settings.broadcast == nil, "old sharing opt-out cleared")
+W.sent = {}
+Advance(20)
+local heartbeat = false
+for _, s in ipairs(W.sent) do if s[3] == "GUILD" and s[2]:match("^H1|") then heartbeat = true end end
+check(heartbeat, "heartbeat sent after login regardless of old setting")
+W.sent = {}
+Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|7|6000|1|0|0|0|abcd1234|WARRIOR|3", "GUILD", "Carl")
+check(#W.sent == 1 and W.sent[1][3] == "WHISPER", "acks sent regardless of old setting")
 check(SF.GetStatus() == "CLEAN", "still CLEAN after reload", select(2, SF.GetStatus()))
 check(SF.LogHead() == headBefore and SF.LogCount() == countBefore, "log preserved")
 check(#SF.run.gaps == 0, "no gap on reload")

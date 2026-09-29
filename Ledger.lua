@@ -13,7 +13,6 @@ local LOG_TRIM = 1000
 local SEP = "\031"
 
 local DEFAULT_SETTINGS = {
-	broadcast = true,
 	tooltips = true,
 	warnings = true,
 	showMinorLog = false,
@@ -277,6 +276,7 @@ SF.On("ADDON_LOADED", function(name)
 	SF.cdb = SelfFoundCharDB
 	SF.db.settings = SF.db.settings or {}
 	ApplyDefaults(SF.db.settings, DEFAULT_SETTINGS)
+	SF.db.settings.broadcast = nil -- removed option; sharing is always on
 	SF.db.witness = SF.db.witness or {}
 	SF.settings = SF.db.settings
 	SF.loadedAt = GetTime()

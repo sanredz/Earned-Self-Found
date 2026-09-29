@@ -33,7 +33,7 @@ First release.
 - Hash-chained event log and a seal over all saved data; editing the saved
   file outside the game disqualifies the run.
 - Witnesses: players running the addon in the same guild or group exchange
-  status heartbeats and keep records of each other.
+  status heartbeats and keep records of each other. Sharing is always on.
 - Shareable reports with a checksum, and a Verify tool that cross-checks a
   report against your own witness records.
 
