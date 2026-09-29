@@ -66,7 +66,7 @@ local function ShowTooltip(self)
 		GameTooltip:AddDoubleLine("Played", SF.Duration(SF.PlayedNow()), 0.7, 0.7, 0.7, 1, 1, 1)
 	end
 	GameTooltip:AddLine(" ")
-	GameTooltip:AddLine("Left-click: open   Right-click: share report", 0.5, 0.5, 0.5)
+	GameTooltip:AddLine("Left-click: open   Right-click: share my run", 0.5, 0.5, 0.5)
 	GameTooltip:AddLine("Drag to move", 0.5, 0.5, 0.5)
 	GameTooltip:Show()
 end

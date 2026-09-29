@@ -1,7 +1,7 @@
 -- Self Found - UI
 -- Native-style window (portrait frame, bottom tabs, inset panels) with an
 -- Overview, a gold Ledger, the event Log, and Witnesses; plus dialogs to
--- export your report and verify someone else's.
+-- share your run and check someone else's.
 
 local ADDON, SF = ...
 
@@ -323,13 +323,13 @@ local function BuildOverview(page)
 	footer.help:SetPoint("TOPLEFT", footer.icon, "BOTTOMLEFT", 0, -10)
 	footer.help:SetPoint("RIGHT", footer, "RIGHT", -14, 0)
 	footer.help:SetWordWrap(true)
-	footer.help:SetText("Share your report so others can check it. Players who witnessed your run can paste it into Verify and compare it against what their own addon recorded.")
+	footer.help:SetText("Share your run on Discord, Reddit or anywhere. Anyone with " .. SF.NAME .. " can paste it into Check a shared run: it opens your profile and compares your run with what witnesses recorded.")
 
-	local export = Button(footer, "Share Report", 140, function()
+	local export = Button(footer, "Share my run", 140, function()
 		UI.ShowExport()
 	end)
 	export:SetPoint("BOTTOMLEFT", 12, 12)
-	local verify = Button(footer, "Verify a Report", 140, function()
+	local verify = Button(footer, "Check a shared run", 160, function()
 		UI.ShowVerify()
 	end)
 	verify:SetPoint("LEFT", export, "RIGHT", 8, 0)
@@ -1137,7 +1137,7 @@ for _, name in ipairs({ "StatsChanged", "StatusChanged", "LogChanged", "WitnessC
 end
 
 -- ---------------------------------------------------------------------------
--- Export and verify dialogs
+-- Share my run / Check a shared run
 -- ---------------------------------------------------------------------------
 
 local function Dialog(name, title, height)
@@ -1193,12 +1193,12 @@ function UI.ShowExport()
 		return
 	end
 	if not exportFrame then
-		exportFrame = Dialog("SelfFoundExportFrame", "Share your " .. SF.NAME .. " report", 460)
+		exportFrame = Dialog("SelfFoundExportFrame", "Share my run", 460)
 		local hint = Text(exportFrame, "GameFontHighlightSmall")
 		hint:SetPoint("TOPLEFT", 66, -32)
 		hint:SetPoint("RIGHT", exportFrame, "RIGHT", -16, 0)
 		hint:SetWordWrap(true)
-		hint:SetText("Press Ctrl+C to copy, then share it anywhere. Anyone with " .. SF.NAME .. " can paste it into Verify.")
+		hint:SetText("Press Ctrl+C to copy, then paste it anywhere. Anyone with " .. SF.NAME .. " can check it with Check a shared run.")
 		exportFrame.area = TextArea(exportFrame.Inset, 516, 330)
 		exportFrame.area:SetPoint("TOPLEFT", 12, -10)
 		local edit = exportFrame.area.EditBox
@@ -1224,87 +1224,42 @@ end
 
 local verifyFrame
 
-local function FormatVerification(report, contradictions, notes)
-	local lines = {}
-	local status = report.status or "?"
-	local r, g, b = SF.ClassColor(report.class)
-	local className = report.class and LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[report.class] or report.class or ""
-	lines[#lines + 1] = string.format("%s  |cffaaaaaa- level %d %s, %s played|r", SF.Colorize(report.char or "?", { r, g, b }),
-		report.level or 0, className, SF.Duration(report.played))
-	lines[#lines + 1] = "Reported status: " .. SF.Colorize(status, StatusColor(status)) .. "  |cffaaaaaa" .. (report.reason or "") .. "|r"
-	lines[#lines + 1] = "|TInterface\\RaidFrame\\ReadyCheck-Ready:14|t Checksum valid (the report wasn't edited after it was exported)."
-	if #contradictions > 0 then
-		for _, c in ipairs(contradictions) do
-			lines[#lines + 1] = "|TInterface\\RaidFrame\\ReadyCheck-NotReady:14|t " .. SF.Colorize(c, SF.COLOR.DISQUALIFIED)
-		end
-	elseif report.integrity ~= 0 then
-		lines[#lines + 1] = "|TInterface\\RaidFrame\\ReadyCheck-Ready:14|t No contradictions with your own records."
-	end
-	for _, n in ipairs(notes) do
-		lines[#lines + 1] = "|cffaaaaaa" .. n .. "|r"
-	end
-	local names = {}
-	for i, w in ipairs(report.witnesses) do
-		if i > 10 then
-			break
-		end
-		names[#names + 1] = SF.ShortName(w.name)
-	end
-	if #names > 0 then
-		lines[#lines + 1] = "Their witnesses: " .. table.concat(names, ", ")
-	end
-	return table.concat(lines, "\n\n")
-end
-
+-- Paste someone's shared run: if it's genuine, their profile opens with the
+-- run's claims shown next to your records and the witnesses' evidence.
 function UI.ShowVerify()
 	if not SF.run then
 		return
 	end
 	if not verifyFrame then
-		verifyFrame = Dialog("SelfFoundVerifyFrame", "Verify an " .. SF.NAME .. " report", 520)
+		verifyFrame = Dialog("SelfFoundVerifyFrame", "Check a shared run", 330)
 		local hint = Text(verifyFrame, "GameFontHighlightSmall")
 		hint:SetPoint("TOPLEFT", 66, -32)
 		hint:SetPoint("RIGHT", verifyFrame, "RIGHT", -16, 0)
 		hint:SetWordWrap(true)
-		hint:SetText("Paste a report someone shared. It's checked for edits and against what your addon witnessed of that character.")
+		hint:SetText("Paste a run someone shared. Their profile opens with it, next to your records, their witness record and any flags.")
 		verifyFrame.area = TextArea(verifyFrame.Inset, 516, 150)
 		verifyFrame.area:SetPoint("TOPLEFT", 12, -10)
-		local check = Button(verifyFrame.Inset, "Verify", 120, function()
-			local text = verifyFrame.area.EditBox:GetText()
-			local report, err = SF.DecodeReport(text)
+		local check = Button(verifyFrame.Inset, "Check", 120, function()
+			local report, err = SF.DecodeReport(verifyFrame.area.EditBox:GetText())
 			if not report then
 				verifyFrame.result:SetText("|TInterface\\RaidFrame\\ReadyCheck-NotReady:14|t " .. SF.Colorize(err, SF.COLOR.DISQUALIFIED))
 				return
 			end
-			local contradictions, notes = SF.VerifyReport(report)
-			verifyFrame.result:SetText(FormatVerification(report, contradictions, notes))
-			verifyFrame.target = report.char
-			verifyFrame.profile:SetShown(report.char ~= nil)
+			verifyFrame.result:SetText("")
+			verifyFrame.area.EditBox:SetText("")
+			verifyFrame:Hide()
+			UI.ShowProfile(report.char, true, report)
 		end)
 		check:SetPoint("TOPLEFT", verifyFrame.area, "BOTTOMLEFT", -4, -10)
 		local clear = Button(verifyFrame.Inset, "Clear", 90, function()
 			verifyFrame.area.EditBox:SetText("")
 			verifyFrame.result:SetText("")
-			verifyFrame.profile:Hide()
 		end)
 		clear:SetPoint("LEFT", check, "RIGHT", 8, 0)
-		-- Cross-check with everyone else's records of this player, too.
-		verifyFrame.profile = Button(verifyFrame.Inset, "Ask other witnesses", 170, function()
-			if verifyFrame.target then
-				UI.ShowProfile(verifyFrame.target, true)
-			end
-		end)
-		verifyFrame.profile:SetPoint("LEFT", clear, "RIGHT", 8, 0)
-		verifyFrame.profile:Hide()
-		local panel = Panel(verifyFrame.Inset, "Result")
-		panel:SetPoint("TOPLEFT", check, "BOTTOMLEFT", 0, -8)
-		panel:SetPoint("BOTTOMRIGHT", -8, 8)
-		verifyFrame.result = Text(panel, "GameFontHighlight")
-		verifyFrame.result:SetPoint("TOPLEFT", 14, -36)
-		verifyFrame.result:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
-		verifyFrame.result:SetJustifyV("TOP")
+		verifyFrame.result = Text(verifyFrame.Inset, "GameFontHighlight")
+		verifyFrame.result:SetPoint("TOPLEFT", check, "BOTTOMLEFT", 4, -12)
+		verifyFrame.result:SetPoint("RIGHT", verifyFrame.Inset, "RIGHT", -14, 0)
 		verifyFrame.result:SetWordWrap(true)
-		verifyFrame.result:SetSpacing(2)
 	end
 	verifyFrame:Show()
 	verifyFrame.area.EditBox:SetFocus()
@@ -1361,7 +1316,7 @@ SlashCmdList.SELFFOUND = function(msg)
 		SF.Print("/sf - open the window")
 		SF.Print("/sf status - print your run status")
 		SF.Print("/sf check <name> - check a player: what you and other witnesses saw")
-		SF.Print("/sf share - share your report   /sf verify - verify someone's report")
+		SF.Print("/sf share - share my run   /sf verify - check a shared run")
 		SF.Print("/sf minimap - show/hide the minimap button")
 		SF.Print("/sf preview - preview the disqualification alert (nothing is saved)")
 	end

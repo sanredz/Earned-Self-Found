@@ -586,10 +586,27 @@ check(select(2, SF.DecodeReport("hello")) ~= nil, "garbage rejected with message
 for _, m in ipairs(allMocks) do
 	if m.__kind == "ScrollFrame" then m.EditBox:SetText(exported) end
 end
-for _, m in ipairs(allMocks) do
-	if m.__text == "Verify" and m.__scripts.OnClick then m.__scripts.OnClick(m) end
+local function ClickCheck()
+	for _, m in ipairs(allMocks) do
+		if m.__text == "Check" and m.__scripts.OnClick then m.__scripts.OnClick(m) end
+	end
 end
-check(#W.errors == 0, "verify button runs", W.errors[1])
+local function AnyText(needle)
+	for _, m in ipairs(allMocks) do
+		if type(m.__text) == "string" and m.__text:find(needle, 1, true) then return true end
+	end
+	return false
+end
+ClickCheck()
+check(#W.errors == 0 and SelfFoundProfileFrame and SelfFoundProfileFrame:IsShown(), "Check a shared run opens the player's profile", W.errors[1])
+check(AnyText("Your shared run") and AnyText("The code is valid"), "the profile shows the shared run's claims")
+SelfFoundProfileFrame:Hide()
+SF.UI.ShowVerify()
+for _, m in ipairs(allMocks) do
+	if m.__kind == "ScrollFrame" then m.EditBox:SetText("just some text") end
+end
+ClickCheck()
+check(AnyText("No Earned verification code") and not SelfFoundProfileFrame:IsShown(), "a bad paste shows an error and opens nothing")
 
 -- Verify against witness records: Bob claims CLEAN but we saw him DQ'd
 Fire("CHAT_MSG_ADDON", "SelfFound", "H1|D|6|5000|1|1|0|0|abcd1234|WARRIOR|3", "GUILD", "Bob")
@@ -1201,9 +1218,11 @@ do
 	Advance(3)
 	check(Sent("^F1|Ace%-TestRealm|undq|") == 2, "answers include our flags about them")
 
-	-- Verify shows the flags we hold about that player
-	local vnotes = table.concat(select(2, SF.VerifyReport({ char = "Dex-TestRealm", status = "CLEAN", level = 20, played = 50000, stats = {}, violations = {}, gapTotal = 0, integrity = 1, witnesses = {} })), " | ")
-	check(vnotes:find("Flag:", 1, true) and vnotes:find("Bea", 1, true) and vnotes:find("Cy", 1, true), "Verify lists flags about them", vnotes)
+	-- Checking Dex's shared run: claims + the flags, in one profile
+	local dexRun = { char = "Dex-TestRealm", status = "CLEAN", level = 20, played = 50000, stats = { deaths = 0 }, violations = {}, gapTotal = 0, integrity = 1, witnesses = {}, income = {}, generated = time(), addon = "1.0.0" }
+	SF.UI.ShowProfile("Dex-TestRealm", false, dexRun)
+	local dexFlags = SF.Profile("Dex-TestRealm").record.flags
+	check(SelfFoundProfileFrame:IsShown() and #dexFlags == 2, "a checked run shows next to the flags about them", #W.errors == 0 and "" or W.errors[1])
 
 	-- Flags in the profile, with names
 	local rec = SF.Profile("Dex-TestRealm").record

@@ -509,7 +509,7 @@ end
 -- A readable summary to paste anywhere, followed by the verification code.
 function SF.ReportSummary(report)
 	local lines = {
-		string.format("%s report: %s", SF.TITLE, report.char or "?"),
+		string.format("%s - shared run of %s", SF.TITLE, report.char or "?"),
 		string.format("Status: %s", report.status or "?"),
 		string.format("Level %d %s %s, %s played", report.level or 0, report.race or "", report.class or "", SF.Duration(report.played)),
 		string.format("Deaths %d, kills %d, quests %d", report.stats.deaths or 0, report.stats.kills or 0, report.stats.quests or 0),
@@ -597,11 +597,11 @@ function SF.DecodeReport(text)
 		return nil, "The verification code is damaged or incomplete (make sure you copied all of it)."
 	end
 	if SF.Hash(json) ~= checksum then
-		return nil, "The verification code doesn't match its checksum - the report was altered."
+		return nil, "The verification code doesn't match its checksum - the shared run was altered."
 	end
 	local report = SF.Try(E.DeserializeJSON, json)
 	if type(report) ~= "table" or report.format ~= "SelfFound" then
-		return nil, "This doesn't look like an " .. SF.NAME .. " report."
+		return nil, "This doesn't look like an " .. SF.NAME .. " shared run."
 	end
 	report.stats = report.stats or {}
 	report.violations = report.violations or {}
@@ -617,16 +617,6 @@ function SF.VerifyReport(report)
 	local rec = SF.db.witness[report.char or ""]
 	if report.integrity == 0 then
 		contradictions[#contradictions + 1] = "The addon itself detected that their saved data was edited outside the game."
-	end
-
-	-- Flags witnesses shared about them (signed, shown with names).
-	local flags = SF.FlagsFor and SF.FlagsFor(report.char or "", report.status == "DISQUALIFIED" and "D" or nil) or {}
-	for i, f in ipairs(flags) do
-		if i > 6 then
-			notes[#notes + 1] = string.format("...and %d more flags (see their profile).", #flags - 6)
-			break
-		end
-		notes[#notes + 1] = string.format("|cffff9933Flag:|r %s %s (%s).", f.by == SF.playerKey and "You" or SF.ShortName(f.by), SF.FlagText(f), SF.Date(f.t))
 	end
 
 	-- Crash recoveries, with the witnesses who confirmed them.
@@ -653,13 +643,13 @@ function SF.VerifyReport(report)
 					Match(obs)
 				end
 			end
-			notes[#notes + 1] = confirmed and "Your own records confirm the crash sighting the report lists from you."
-				or "The report lists a crash sighting from you that your records can't confirm (it may be too old)."
+			notes[#notes + 1] = confirmed and "Your own records confirm the crash sighting their shared run lists from you."
+				or "Their shared run lists a crash sighting from you that your records can't confirm (it may be too old)."
 		end
 	end
 
 	if not rec or not rec.history or #rec.history == 0 then
-		notes[#notes + 1] = "You have no witness records of this character, so only the checksum could be checked. Ask one of their witnesses to verify it."
+		notes[#notes + 1] = "You have no witness records of this character, so only the code could be checked."
 		return contradictions, notes
 	end
 
@@ -671,19 +661,19 @@ function SF.VerifyReport(report)
 			considered = considered + 1
 			local when = string.format("at %s played (%s)", SF.Duration(obs.pl), SF.Date(obs.t))
 			if obs.s == "D" and report.status ~= "DISQUALIFIED" then
-				contradictions[#contradictions + 1] = "You saw them DISQUALIFIED " .. when .. ", but the report says " .. tostring(report.status) .. "."
+				contradictions[#contradictions + 1] = "You saw them DISQUALIFIED " .. when .. ", but their shared run says " .. tostring(report.status) .. "."
 			end
 			if (obs.v or 0) > #report.violations then
-				contradictions[#contradictions + 1] = string.format("You saw %d violation(s) %s, the report lists %d.", obs.v, when, #report.violations)
+				contradictions[#contradictions + 1] = string.format("You saw %d violation(s) %s, their shared run lists %d.", obs.v, when, #report.violations)
 			end
 			if (obs.d or 0) > reportDeaths then
-				contradictions[#contradictions + 1] = string.format("You saw %d death(s) %s, the report lists %d.", obs.d, when, reportDeaths)
+				contradictions[#contradictions + 1] = string.format("You saw %d death(s) %s, their shared run lists %d.", obs.d, when, reportDeaths)
 			end
 			if (obs.lvl or 0) > (report.level or 0) then
-				contradictions[#contradictions + 1] = string.format("You saw them at level %d %s, the report says level %d.", obs.lvl, when, report.level or 0)
+				contradictions[#contradictions + 1] = string.format("You saw them at level %d %s, their shared run says level %d.", obs.lvl, when, report.level or 0)
 			end
 			if (obs.g or 0) > (report.gapTotal or 0) + 60 then
-				contradictions[#contradictions + 1] = string.format("You saw %s of untracked time %s, the report lists %s.", SF.Duration(obs.g), when, SF.Duration(report.gapTotal))
+				contradictions[#contradictions + 1] = string.format("You saw %s of untracked time %s, their shared run lists %s.", SF.Duration(obs.g), when, SF.Duration(report.gapTotal))
 			end
 		else
 			newer = newer + 1
@@ -694,7 +684,7 @@ function SF.VerifyReport(report)
 		notes[#notes + 1] = string.format("Checked against %d observation(s) you recorded between %s and %s.", considered, SF.Date(rec.first), SF.Date(rec.last))
 	end
 	if newer > 0 then
-		notes[#notes + 1] = string.format("You have %d observation(s) newer than this report; ask them for an up-to-date one.", newer)
+		notes[#notes + 1] = string.format("You have %d observation(s) newer than this shared run; ask them for an up-to-date one.", newer)
 	end
 	return contradictions, notes
 end

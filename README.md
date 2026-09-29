@@ -40,8 +40,10 @@ run, and lets other players vouch for it.
   and deaths.
 - **Online without Earned:** if someone who runs the addon is online but
   their addon goes quiet, witnesses notice and record it.
-- **Share and verify:** export a report anyone can paste into Verify, which
-  checks it against their own witness records.
+- **Share my run:** copy your run (status, stats, gold, witnesses) with a
+  verification code to paste on Discord, Reddit or anywhere. **Check a
+  shared run:** paste someone's, and their profile opens with it, next to
+  your records, their witness record and any flags.
 
 <p>
   <img src="media/log.png" alt="Event log tab" width="49%">
@@ -227,8 +229,8 @@ shows it: *"Reached level 20, witnessed by 3"* (hover it for the names).
 |---|---|
 | `/sf` | Open or close the window |
 | `/sf status` | Print your run status |
-| `/sf share` | Export your report |
-| `/sf verify` | Verify someone else's report |
+| `/sf share` | Share my run (copy it to paste anywhere) |
+| `/sf verify` | Check a shared run someone pasted |
 | `/sf check <name>` | Open a player's profile (just `/sf check` for your own) |
 | `/sf minimap` | Show or hide the minimap button |
 | `/sf broadcast` | Send your status to guild and group now |

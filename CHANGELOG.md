@@ -75,11 +75,12 @@ First release.
 - `/sf preview` shows the disqualification alert without saving or sharing
   anything.
 - Griefing protection: other players can never disqualify you or make you
-  Unverified. Witness claims are recorded by name and shown in Verify with how
-  many witnesses back them. Messages from players outside your guild or group
+  Unverified. What witnesses report is recorded by name and shown, never
+  enforced. Messages from players outside your guild or group
   are ignored.
-- Shareable reports with a checksum, and a Verify tool that cross-checks a
-  report against your own witness records.
+- Share my run: a summary with a verification code to paste anywhere.
+  Check a shared run: paste one and that player's profile opens with the
+  run's claims next to your records, their witness record and any flags.
 
 ### Interface
 - Native-style window with Overview, Ledger, Log and Witnesses tabs.

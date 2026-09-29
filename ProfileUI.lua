@@ -20,6 +20,8 @@ local BAR_WIDTH, BAR_SLOTS = 600, 60
 
 local frame
 local current -- "Name-Realm" being shown
+local sharedRuns = {} -- [name] = a shared run pasted into "Check a shared run"
+
 
 local function Plural(n, word)
 	return string.format("%d %s%s", n, word, n == 1 and "" or "s")
@@ -284,6 +286,49 @@ local function OthersLines(p)
 	return table.concat(lines, "\n")
 end
 
+-- "Their shared run": what the pasted run claims, checked against your
+-- own records. (Flags and witnessed hours are shown by the rest of the
+-- profile.)
+local CHECK_OK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:14|t "
+local CHECK_BAD = "|TInterface\\RaidFrame\\ReadyCheck-NotReady:14|t "
+
+local function SharedRunText(p, report)
+	local earned = 0
+	for _, v in pairs(report.income or {}) do
+		earned = earned + (tonumber(v) or 0)
+	end
+	local status = report.status or "?"
+	local lines = {
+		string.format("Claims %s  |  level %d  |  %s played  |  %s  |  %s earned  |  %s  |  %s untracked",
+			SF.Colorize(status, K.StatusColor(status)), report.level or 0, SF.Duration(report.played),
+			Plural(report.stats.deaths or 0, "death"), SF.PlainMoney(earned), Plural(#report.violations, "violation"),
+			SF.Duration(report.gapOpen or report.gapTotal)),
+		string.format("|cff888888Shared %s with %s %s. The code is valid: the text wasn't edited after it was shared.|r",
+			SF.Date(report.generated), SF.NAME, report.addon or "?"),
+	}
+	local contradictions, notes = SF.VerifyReport(report)
+	for i, c in ipairs(contradictions) do
+		if i > 3 then
+			lines[#lines + 1] = SF.Colorize(string.format("...and %d more contradictions", #contradictions - 3), RED)
+			break
+		end
+		lines[#lines + 1] = CHECK_BAD .. SF.Colorize(c, RED)
+	end
+	if #contradictions == 0 then
+		lines[#lines + 1] = p.mine and (CHECK_OK .. SF.Colorize("Matches everything your addon recorded of them.", GREEN))
+			or "|cff888888You have no records of them yourself - see the witness record and flags below.|r"
+	end
+	for i, n in ipairs(notes) do
+		if i > 2 then
+			break
+		end
+		if not n:find("no witness records", 1, true) then
+			lines[#lines + 1] = "|cff888888" .. n .. "|r"
+		end
+	end
+	return table.concat(lines, "\n")
+end
+
 local function Refresh()
 	if not (frame and frame:IsShown() and current and SF.run) then
 		return
@@ -312,6 +357,17 @@ local function Refresh()
 
 	ShowRecord(p)
 
+	-- A pasted shared run sits between the record and the two columns.
+	local report = sharedRuns[p.name]
+	frame.shared:SetShown(report ~= nil)
+	frame.mine:ClearAllPoints()
+	frame.mine:SetPoint("TOPLEFT", report and frame.shared or frame.record, "BOTTOMLEFT", 0, -6)
+	frame.mine:SetPoint("BOTTOMLEFT", 4, 4)
+	if report then
+		frame.shared.title:SetText(p.isSelf and "Your shared run" or "Their shared run")
+		frame.sharedText:SetText(SharedRunText(p, report))
+	end
+
 	frame.mineTitle:SetText(p.isSelf and "Your run" or "What you've seen")
 	frame.mineLines:SetText(MineLines(p))
 	frame.timeline:SetList(Timeline(p))
@@ -324,7 +380,7 @@ end
 UI.RefreshProfile = Refresh
 
 local function Build()
-	frame = K.Dialog("SelfFoundProfileFrame", "Player profile", 640)
+	frame = K.Dialog("SelfFoundProfileFrame", "Player profile", 720)
 	frame:SetWidth(680)
 
 	local header = Panel(frame.Inset)
@@ -382,7 +438,29 @@ local function Build()
 	frame.caption:SetPoint("RIGHT", record, "RIGHT", -14, 0)
 	frame.caption:SetWordWrap(false)
 
+	frame.record = record
+
+	-- Shown only while checking a pasted shared run.
+	local shared = Panel(frame.Inset, "Their shared run")
+	shared:SetPoint("TOPLEFT", record, "BOTTOMLEFT", 0, -6)
+	shared:SetPoint("TOPRIGHT", record, "BOTTOMRIGHT", 0, -6)
+	shared:SetHeight(122)
+	shared:Hide()
+	frame.shared = shared
+	frame.sharedText = Text(shared, "GameFontHighlightSmall")
+	frame.sharedText:SetPoint("TOPLEFT", 14, -34)
+	frame.sharedText:SetPoint("RIGHT", shared, "RIGHT", -110, 0)
+	frame.sharedText:SetJustifyV("TOP")
+	frame.sharedText:SetWordWrap(true)
+	frame.sharedText:SetSpacing(3)
+	local dismiss = Button(shared, "Dismiss", 90, function()
+		sharedRuns[current] = nil
+		Refresh()
+	end)
+	dismiss:SetPoint("TOPRIGHT", -12, -6)
+
 	local mine = Panel(frame.Inset, "What you've seen")
+	frame.mine = mine
 	mine:SetPoint("TOPLEFT", record, "BOTTOMLEFT", 0, -6)
 	mine:SetPoint("BOTTOMLEFT", 4, 4)
 	mine:SetWidth(330)
@@ -421,7 +499,8 @@ end
 
 -- Opens the profile of `name` ("Name-Realm", or a short name you know).
 -- `ask` = also ask other witnesses right away.
-function UI.ShowProfile(name, ask)
+-- `report` = a decoded shared run to check alongside (Check a shared run).
+function UI.ShowProfile(name, ask, report)
 	if not SF.run then
 		return
 	end
@@ -433,6 +512,9 @@ function UI.ShowProfile(name, ask)
 		Build()
 	end
 	current = name
+	if report then
+		sharedRuns[name] = report
+	end
 	frame:Show()
 	if ask then
 		SF.AskWitnesses(name)
