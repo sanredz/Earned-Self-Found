@@ -13,8 +13,7 @@ First release.
 ### Rules
 - Immediate disqualification for completing a trade where anything changes
   hands, bidding on / buying out / listing an auction, taking items or gold
-  from mail sent by another player, and guild bank or Warband bank
-  withdrawals.
+  from mail sent by another player, and guild bank withdrawals.
 - Runs are marked Unverified for play time the addon didn't see (checked
   against `/played`) or when installed on a character that already had play
   time.
