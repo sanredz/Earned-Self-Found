@@ -13,7 +13,8 @@ local ACK_INTERVAL = 600
 local RECALL_INTERVAL = 120   -- how often to ask witnesses to recover a gap
 local REPLY_INTERVAL = 300    -- per requester and gap
 local SESSION_SILENCE = 180   -- fallback session boundary for senders without a session id
-local ENDS_MAX = 10           -- last heartbeat of each of a player's recent sessions
+local ENDS_MAX = 30           -- last heartbeat of each of a player's recent sessions...
+local ENDS_MAX_AGE = 8 * 86400 -- ...kept long enough to answer recalls for a week
 local STATUS_WORD = { C = "CLEAN", U = "UNVERIFIED", D = "DISQUALIFIED" }
 SF.STATUS_WORD = STATUS_WORD
 
@@ -180,6 +181,11 @@ local function Record(sender, obs, viaShared)
 		if newSession then
 			rec.ends = rec.ends or {}
 			table.insert(rec.ends, prev)
+			-- Every /reload or relog is a session, so keep them by age (the
+			-- recall window is 7 days), with a hard cap for saved-data size.
+			while #rec.ends > 0 and obs.t - (rec.ends[1].t or 0) > ENDS_MAX_AGE do
+				table.remove(rec.ends, 1)
+			end
 			while #rec.ends > ENDS_MAX do
 				table.remove(rec.ends, 1)
 			end
@@ -436,11 +442,14 @@ local function AddTooltipLine(tooltip)
 	if not unit or not SF.Safe(UnitIsPlayer(unit)) then
 		return
 	end
-	local line
+	-- One fact per line:
+	--   Self Found: CLEAN   (level 12, seen 5m ago)
+	--   Well witnessed
+	--   1 dispute
+	local status, tier, disputes, detail
 	if SF.Safe(UnitIsUnit(unit, "player")) then
-		local _, _, code = SF.GetStatus()
-		local tier, _, _, disputes = SF.WitnessRating()
-		line = "Self Found: " .. SF.StatusText(code) .. "  " .. SF.RatingText(tier, disputes)
+		status = select(3, SF.GetStatus())
+		tier, _, _, disputes = SF.WitnessRating()
 	else
 		local name, realm = UnitName(unit)
 		name, realm = SF.Safe(name), SF.Safe(realm)
@@ -449,19 +458,24 @@ local function AddTooltipLine(tooltip)
 		end
 		local key = name .. "-" .. ((realm and realm ~= "") and realm or SF.RealmName())
 		local rec = SF.db.witness[key]
-		if rec and rec.latest then
-			local l = rec.latest
-			line = "Self Found: " .. SF.StatusText(l.s)
-			if l.rt then
-				line = line .. "  " .. SF.RatingText(l.rt, l.dp)
-			end
-			line = line .. string.format("  |cffaaaaaalevel %d, seen %s|r", l.lvl or 0, SF.Ago(rec.last))
+		if not (rec and rec.latest) then
+			return
 		end
+		local l = rec.latest
+		status, tier, disputes = l.s, l.rt, l.dp
+		detail = string.format("|cffaaaaaalevel %d, seen %s|r", l.lvl or 0, SF.Ago(rec.last))
 	end
-	if line then
-		tooltip:AddLine(line)
-		tooltip:Show()
+
+	tooltip:AddLine("Self Found: " .. SF.StatusText(status) .. (detail and ("  " .. detail) or ""))
+	local rating = SF.RATINGS[tonumber(tier) or -1]
+	if rating then
+		tooltip:AddLine(rating.name, rating.color[1], rating.color[2], rating.color[3])
 	end
+	disputes = tonumber(disputes) or 0
+	if disputes > 0 then
+		tooltip:AddLine(string.format("%d dispute%s", disputes, disputes == 1 and "" or "s"), 1, 0.6, 0.2)
+	end
+	tooltip:Show()
 end
 
 if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then

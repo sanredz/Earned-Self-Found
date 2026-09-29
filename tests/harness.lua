@@ -153,6 +153,15 @@ local function Advance(seconds)
 	W.clock = target
 end
 
+-- Moves the clock forward without running every tick in between (for
+-- multi-day jumps); pending timers shift along with it.
+local function Jump(seconds)
+	for _, t in ipairs(W.timers) do
+		t.at = t.at + seconds
+	end
+	W.clock = W.clock + seconds
+end
+
 local BASE_TIME = 1759000000
 
 local function InstallStubs()
@@ -716,6 +725,27 @@ do
 	end
 	check(#W.sent <= 20, "recall answers capped per minute", #W.sent)
 
+	-- A crash sighting survives many later sessions (every /reload is one)
+	-- for the whole recall week...
+	Advance(61)
+	local pl = 5200
+	for i = 1, 15 do
+		Advance(120)
+		pl = pl + 120
+		Beat("Dana", pl, 300 + i)
+	end
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|3999|5090", "GUILD", "Dana")
+	check(#W.sent == 1 and W.sent[1][2]:match("^C1|3999|5060|"), "crash sighting kept through 15 later sessions", W.sent[1] and W.sent[1][2])
+	-- ...but not forever
+	Jump(9 * 86400)
+	Beat("Dana", pl + 60, 999)
+	local kept = false
+	for _, o in ipairs(SelfFoundDB.witness["Dana-TestRealm"].ends) do
+		if o.pl == 5060 then kept = true end
+	end
+	check(not kept, "session endings older than 8 days are pruned")
+
 	-- Older senders without a session id: long silence marks a new session
 	Beat("Erin", 100); Advance(10); Beat("Erin", 110); Advance(10); Beat("Erin", 120)
 	check(not SelfFoundDB.witness["Erin-TestRealm"].ends, "no session break within a session")
@@ -914,7 +944,16 @@ do
 	_G.UnitName = function(u) if u == "player" then return "Tester" end return "Rated" end
 	W.tooltipPost(tip)
 	_G.GameTooltip, _G.UnitName = realTooltip, realUnitName
-	check(lines[1] and lines[1]:find("Well witnessed", 1, true) and lines[1]:find("(1 disputed)", 1, true), "tooltip shows their rating and disputes", lines[1])
+	check(#lines == 3 and lines[1]:find("CLEAN", 1, true) and lines[1]:find("level 5", 1, true) and lines[2] == "Well witnessed" and lines[3] == "1 dispute",
+		"tooltip: status, rating and disputes on separate lines", table.concat(lines, " / "))
+
+	-- Own tooltip, no disputes: two lines
+	lines = {}
+	tip.GetUnit = function() return "Tester", "player" end
+	_G.GameTooltip = tip
+	W.tooltipPost(tip)
+	_G.GameTooltip = realTooltip
+	check(#lines == 2 and lines[2] == "Lightly witnessed", "own tooltip: status and rating, no dispute line", table.concat(lines, " / "))
 
 	-- Reports and Verify
 	local r = SF.BuildReport()
