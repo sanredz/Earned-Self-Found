@@ -16,6 +16,7 @@ local SESSION_SILENCE = 180   -- fallback session boundary for senders without a
 local ENDS_MAX = 30           -- last heartbeat of each of a player's recent sessions...
 local ENDS_MAX_AGE = 8 * 86400 -- ...kept long enough to answer recalls for a week
 local STATUS_WORD = { C = "CLEAN", U = "UNVERIFIED", D = "DISQUALIFIED" }
+local ownNames = {} -- other spellings the server used for us this session
 SF.STATUS_WORD = STATUS_WORD
 
 -- ---------------------------------------------------------------------------
@@ -267,13 +268,24 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 		return
 	end
 	sender = SF.FullName(sender)
-	if not sender or sender == SF.playerKey then
+	if not sender or sender == SF.playerKey or ownNames[sender] then
 		return
 	end
 	channel = SF.Safe(channel)
 	local shared = channel == "GUILD" or channel == "PARTY" or channel == "RAID"
 	local parts = Split(text, "|")
 	local kind = parts[1]
+
+	-- Our own heartbeat echoed back under a name we didn't expect (the
+	-- server spelling our name differently): only we can make our token.
+	if kind == "H1" or kind == "A1" then
+		local obs = ParseBody(parts, 1)
+		if obs and obs.tk and obs.sid == SF.sessionId and obs.tk == SF.Token(obs.pl, obs.s, obs.v) then
+			ownNames[sender] = true
+			SF.ForgetSelf(sender)
+			return
+		end
+	end
 
 	-- Anti-griefing: the server guarantees who sent a message, and everyone
 	-- can only speak about themselves - except C1, a witness's sighting of
@@ -330,7 +342,68 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 	end
 end)
 
+-- Removes records of ourselves under `name`: our own echoed heartbeats
+-- recorded as a witness, acks from ourselves, and flags we raised on
+-- ourselves. (Flags others raised about us are kept.)
+function SF.ForgetSelf(name)
+	local changed = SF.db.witness[name] ~= nil or (SF.run.witnessedBy or {})[name] ~= nil
+	SF.db.witness[name] = nil
+	if SF.run.witnessedBy then
+		SF.run.witnessedBy[name] = nil
+	end
+	for _, target in ipairs({ name, SF.playerKey }) do
+		for id, f in pairs(SF.db.flags and SF.db.flags[target] or {}) do
+			if f.by == name or f.by == SF.playerKey then
+				SF.db.flags[target][id] = nil
+				changed = true
+			end
+		end
+	end
+	if changed then
+		SF.Changed()
+		SF.Fire("WitnessChanged")
+	end
+end
+
+-- Before 1.0 our key left out the Forever surname ("Name-Realm"): flags we
+-- raised under it are moved to our real name, and anything about that old
+-- name is about us.
+local function MigrateOldKey()
+	local first = SF.Safe(SF.Try(UnitName, "player"))
+	local old = SF.FullName(first)
+	if not old or old == SF.playerKey then
+		return
+	end
+	local flags = SF.db.flags or {}
+	for target, list in pairs(flags) do
+		local moved = {}
+		for id, f in pairs(list) do
+			if type(f) == "table" and f.by == old then
+				list[id] = nil
+				if target ~= old and target ~= SF.playerKey then
+					f.by = SF.playerKey
+					moved[#moved + 1] = f
+				end
+			end
+		end
+		for _, f in ipairs(moved) do
+			list[f.by .. "|" .. f.k .. "|" .. math.floor(f.t) .. "|" .. (f.v or 0)] = f
+		end
+	end
+	if flags[old] then
+		flags[SF.playerKey] = flags[SF.playerKey] or {}
+		for id, f in pairs(flags[old]) do
+			flags[SF.playerKey][id] = f
+		end
+		flags[old] = nil
+	end
+	SF.ForgetSelf(old)
+end
+
 SF.Listen("Ready", function()
+	-- Our own heartbeats could come back as someone else's before 1.0.
+	MigrateOldKey()
+	SF.ForgetSelf(SF.playerKey)
 	SF.sessionId = time()
 	if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
 		pcall(C_ChatInfo.RegisterAddonMessagePrefix, SF.PREFIX)
@@ -385,12 +458,10 @@ local function AddTooltipLine(tooltip)
 		status = select(3, SF.GetStatus())
 		key = SF.playerKey
 	else
-		local name, realm = UnitName(unit)
-		name, realm = SF.Safe(name), SF.Safe(realm)
-		if not name then
+		key = SF.UnitKey(unit)
+		if not key then
 			return
 		end
-		key = name .. "-" .. ((realm and realm ~= "") and realm or SF.RealmName())
 		local rec = SF.db.witness[key]
 		if rec and rec.latest then
 			local l = rec.latest

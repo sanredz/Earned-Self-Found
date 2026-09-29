@@ -208,7 +208,7 @@ local function InstallStubs()
 	_G.SlashCmdList = {}
 	_G.RAID_CLASS_COLORS = { WARRIOR = { r = 0.78, g = 0.61, b = 0.43 } }
 	_G.LOCALIZED_CLASS_NAMES_MALE = { WARRIOR = "Warrior" }
-	_G.UnitName = function(u) if u == "player" then return "Tester" end return "Bob" end
+	_G.UnitName = function(u) if u == "player" then return "Tester", W.surname end return "Bob", W.otherSurname end
 	_G.GetUnitName = function() return "Bob" end
 	_G.UnitClass = function() return "Warrior", "WARRIOR" end
 	_G.UnitRace = function() return "Human", "Human" end
@@ -218,8 +218,8 @@ local function InstallStubs()
 	_G.C_AddOns = { GetAddOnMetadata = function(addon, field) if addon == ADDON_NAME and field == "Version" then return W.tocVersion or TOC_VERSION end end }
 	_G.GetRealmName = function() return "Test Realm" end
 	_G.GetNormalizedRealmName = function() return "TestRealm" end
-	_G.GetMoney = function() return W.money end
-	_G.RequestTimePlayed = function() W.playedRequested = true end
+	_G.GetMoney = function() if W.moneyLoadingUntil and W.clock < W.moneyLoadingUntil then return 0 end return W.money end
+	_G.RequestTimePlayed = function() W.playedRequested = true; W.playedRequests = (W.playedRequests or 0) + 1 end
 	_G.GetRealZoneText = function() return "Elwynn Forest" end
 	_G.GetZoneText = _G.GetRealZoneText
 	_G.IsInGuild = function() return true end
@@ -253,6 +253,7 @@ local function InstallStubs()
 	_G.C_Container = {
 		GetContainerNumSlots = function(bag) return W.bags[bag] and 16 or 0 end,
 		GetContainerItemInfo = function(bag, slot)
+			if W.bagsLoading then return nil end
 			local item = W.bags[bag] and W.bags[bag][slot]
 			if item then return { hyperlink = item[1], stackCount = item[2], hasNoValue = false, itemID = tonumber(item[1]:match("item:(%d+)")) } end
 		end,
@@ -260,6 +261,10 @@ local function InstallStubs()
 		PickupContainerItem = function() end,
 		SplitContainerItem = function() end,
 		ContainerIDToInventoryID = function(bag) return 30 + bag end,
+		GetContainerItemID = function(bag, slot)
+			local item = W.bags[bag] and W.bags[bag][slot]
+			return item and tonumber(item[1]:match("item:(%d+)")) or nil
+		end,
 	}
 	W.bags = W.bags or { [0] = { [1] = { "|Hitem:2589::|h[Linen Cloth]|h", 5 } } }
 	_G.GetInventoryItemLink = function() return nil end
@@ -1296,13 +1301,14 @@ do
 	Advance(60)                           -- idle linger after the disconnect
 	Boot(saved, { played = ServerPlayed() })
 	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0 and SF.integrity.ok, "idle time after a disconnect is forgiven", select(2, SF.GetStatus()))
-	check(SF.cdb.log[#SF.cdb.log].m:find("idle time after a disconnect", 1, true) ~= nil, "forgiven idle time is logged")
+	check(SF.cdb.log[#SF.cdb.log].m:find("untracked while logging in or out", 1, true) ~= nil and SF.cdb.log[#SF.cdb.log].x, "forgiven time is logged as routine")
 
 	Advance(100)
 	saved = Disconnect()
 	Advance(60)
 	W.money = W.money + 5000              -- received gold while the addon wasn't looking
 	Boot(saved, { played = ServerPlayed() })
+	Advance(21)
 	check(SF.GetStatus() == "UNVERIFIED", "short gap with changed gold is not forgiven")
 
 	Fresh()
@@ -1311,6 +1317,7 @@ do
 	Advance(60)
 	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 1 } -- received an item
 	Boot(saved, { played = ServerPlayed() })
+	Advance(21)
 	check(SF.GetStatus() == "UNVERIFIED", "short gap with changed bags is not forgiven")
 	W.bags[0][2] = nil
 
@@ -1328,7 +1335,189 @@ do
 	Advance(25)                           -- a quick session without the addon...
 	W.money = W.money + 5000              -- ...taking a pre-arranged trade
 	Boot(saved, { played = ServerPlayed() })
-	check(SF.GetStatus() == "UNVERIFIED", "25s gap with changed gold counts")
+	check(SF.GetStatus() == "UNVERIFIED", "25s gap with gained gold counts")
+	check(SF.run.gaps[1] and SF.run.gaps[1].why and SF.run.gaps[1].why:find("gained gold", 1, true) or SF.cdb.log[#SF.cdb.log].m:find("gained gold", 1, true), "the log says what was gained", SF.cdb.log[#SF.cdb.log].m)
+
+	-- Bag info still loading at login made an unchanged character look
+	-- changed (seen in game): the re-check clears it.
+	Fresh()
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 1 }
+	Advance(100)
+	saved = Logout()
+	Advance(25)
+	W.bagsLoading = true
+	Boot(saved, { played = ServerPlayed() })
+	W.bagsLoading = false
+	Advance(21)
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "bags still loading at login isn't a gain")
+	W.bags[0][2] = nil
+
+	-- Losing things isn't suspicious: conjured food vanishes after 15 min
+	-- logged out - with a 30s login gap, and with a 90s disconnect linger.
+	Fresh()
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 5 }
+	Advance(100)
+	saved = Logout()
+	Advance(30)
+	W.bags[0][2] = nil
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "items vanishing while logged out isn't a gain")
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 5 }
+	Advance(100)
+	saved = Disconnect()
+	Advance(90)
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 2 }
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "a disconnect linger with only losses is forgiven")
+
+	-- ...but a bigger stack is a gain.
+	Advance(100)
+	saved = Logout()
+	Advance(20)
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 3 }
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "UNVERIFIED", "more of an item is a gain")
+	W.bags[0][2] = nil
+
+	-- Equipping or moving items isn't a gain.
+	Fresh()
+	W.bags[0][2] = { "|Hitem:25::|h[Worn Shortsword]|h", 1 }
+	Advance(100)
+	saved = Logout()
+	Advance(20)
+	W.bags[0][2] = nil
+	W.bags[1] = W.bags[1] or {}
+	W.bags[1][1] = { "|Hitem:25::|h[Worn Shortsword]|h", 1 }
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN", "moving an item to another bag isn't a gain")
+	W.bags[1][1] = nil
+
+	-- Alt+F4: the server keeps the character in the world for about a
+	-- minute, and /played counts it (seen in game: 63s and 65s).
+	Fresh()
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 4 }
+	Advance(100)
+	saved = Logout()
+	Advance(65)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "Alt+F4 linger with nothing gained is forgiven")
+	-- ...even if a pet or DoT got a kill meanwhile (XP isn't a trade).
+	Advance(100)
+	saved = Logout()
+	Advance(65)
+	W.xp = (W.xp or 0) + 120
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "XP gained while lingering is forgiven")
+	-- ...and longer lingers up to 5 minutes.
+	Advance(100)
+	saved = Disconnect()
+	Advance(280)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "a 280s linger with nothing gained is forgiven")
+	W.bags[0][2] = nil
+
+	-- Spending gold can't happen while lingering: buying something and
+	-- using it up with the addon off still counts.
+	Fresh()
+	W.money = 5000
+	Advance(100)
+	saved = Logout()
+	Advance(60)
+	W.money = 1000
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "UNVERIFIED" and SF.cdb.log[#SF.cdb.log].m:find("spent gold", 1, true), "gold spent while untracked counts", SF.cdb.log[#SF.cdb.log].m)
+
+	-- ...but gold reading 0 while the game is still loading doesn't.
+	Fresh()
+	W.money = 5000
+	Advance(100)
+	saved = Logout()
+	Advance(60)
+	W.moneyLoadingUntil = W.clock + 2     -- the 1s login snapshot sees 0 gold
+	Boot(saved, { played = ServerPlayed() })
+	W.moneyLoadingUntil = nil
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "gold still loading at login isn't spending")
+
+	-- The first /played saves a fresh snapshot right away (before any
+	-- regular save), so it's always in the current format.
+	Fresh()
+	Advance(100)
+	SF.run.played.snap = "407f1eb3bbdfa7f9"
+	SF.Changed()
+	SF.Publish()
+	saved = Disconnect()
+	Advance(20)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.run.played.snap:find(";", 1, true) ~= nil, "a fresh snapshot is saved at the first /played")
+
+	-- Snapshots from an older version can't be compared: no false gaps.
+	Fresh()
+	Advance(100)
+	SF.run.played.snap = "407f1eb3bbdfa7f9"
+	SF.Changed()
+	SF.Publish()
+	saved = Disconnect()
+	Advance(65)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0 and SF.integrity.ok, "an old-style snapshot doesn't cause a gap")
+	check(SF.run.played.snap:find(";", 1, true) ~= nil, "and is replaced by a new one right away")
+
+	-- An unanswered /played is asked again; otherwise the whole session
+	-- would look unwatched at the next login.
+	Fresh()
+	Advance(100)
+	saved = Logout()
+	Advance(20)
+	local realRequest = _G.RequestTimePlayed
+	W.playedRequests = 0
+	Boot(saved)                           -- no answer
+	Advance(25)
+	check(W.playedRequests >= 3, "/played is requested again until answered", W.playedRequests)
+	Fire("TIME_PLAYED_MSG", ServerPlayed(), ServerPlayed())
+	local asked = W.playedRequests
+	Advance(40)
+	check(W.playedRequests == asked and SF.GetStatus() == "CLEAN", "...and not after the answer")
+	_G.RequestTimePlayed = realRequest
+
+	-- Item details still loading mid-session aren't saved as missing items.
+	Fresh()
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 4 }
+	Advance(20)
+	local before = SF.run.played.snap
+	W.bagsLoading = true
+	Advance(16)                           -- a regular save while details are missing
+	W.bagsLoading = false
+	check(SF.run.played.snap == before, "an incomplete snapshot isn't saved")
+	saved = Disconnect()
+	Advance(30)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN", "so the next login doesn't see a gain")
+	W.bags[0][2] = nil
+
+	-- Looting right before Alt+F4 is saved at once, not a second later.
+	Fresh()
+	Advance(100)
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 1 }
+	Fire("BAG_UPDATE_DELAYED")
+	Advance(0.1)
+	saved = Disconnect()
+	Advance(65)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN", "loot right before closing the game isn't a gain")
+	W.bags[0][2] = nil
+
+	-- Bag info already unloading at logout mustn't make the next login look
+	-- like a gain: the logout save keeps the most of everything.
+	Fresh()
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 4 }
+	Advance(100)
+	W.bagsLoading = true
+	saved = Logout()
+	W.bagsLoading = false
+	Advance(20)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "bags unloading at logout isn't a gain later")
+	W.bags[0][2] = nil
 	Fresh()
 	Advance(100)
 	saved = Logout()
@@ -1547,6 +1736,94 @@ do
 	local saved = Logout()
 	Boot(saved, { played = ServerPlayed() })
 	check(SelfFoundDB.witness["Gus-TestRealm"].silentN >= 2 and not SelfFoundDB.witness["Gus-TestRealm"].silentOpen, "silent periods saved (open one closed at logout)")
+end
+
+-- ---------------------------------------------------------------------------
+-- 12. Forever surnames: UnitName returns (name, surname), and the server
+--     names senders "Name Surname-Realm". We must never witness ourselves.
+-- ---------------------------------------------------------------------------
+
+do
+	-- A save from before the fix: our key lacked the surname, and our own
+	-- echoed heartbeats were recorded as a witness (who also "acked" us).
+	W = { clock = 0, money = 0, level = 1 }
+	playedBase = 10
+	Boot(nil, { played = 10 })
+	check(SF.playerKey == "Tester-TestRealm", "no surname: key is Name-Realm")
+	SF.db.witness["Tester Jack-TestRealm"] = { shared = time(), n = 5, latest = { s = "C", lvl = 1 } }
+	SF.run.witnessedBy["Tester Jack-TestRealm"] = { n = 3, first = time(), last = time() }
+	SF.AddFlag("Tester Jack-TestRealm", { by = SF.playerKey, k = "noaddon", t = time(), s = 700 })
+	SF.AddFlag(SF.playerKey, { by = "Dana-TestRealm", k = "noaddon", t = time(), s = 700 })
+	SF.AddFlag("Zed-TestRealm", { by = SF.playerKey, k = "noaddon", t = time(), s = 700 })
+	SF.Changed()
+	local saved = Logout()
+
+	W.surname = "Jack"
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.playerKey == "Tester Jack-TestRealm", "surname: key is Name Surname-Realm", SF.playerKey)
+	check(SF.run.char == SF.playerKey, "old run's name migrated to include the surname", SF.run.char)
+	check(SF.integrity.ok and SF.GetStatus() == "CLEAN", "migration doesn't break the seal")
+	check(SF.db.witness["Tester Jack-TestRealm"] == nil and SF.run.witnessedBy["Tester Jack-TestRealm"] == nil, "our old self-records are purged")
+	local selfFlags = 0
+	for _, f in ipairs(SF.FlagsFor(SF.playerKey)) do
+		if f.by == SF.playerKey or f.by == "Tester-TestRealm" then selfFlags = selfFlags + 1 end
+	end
+	check(selfFlags == 0, "flags we raised on ourselves are purged")
+	check(next(SF.db.flags["Tester-TestRealm"] or {}) == nil and SF.FlagsFor and #SF.FlagsFor(SF.playerKey) == 1, "flags others raised about our old name are kept, under our name")
+	check(SF.FlagsFor("Zed-TestRealm")[1] and SF.FlagsFor("Zed-TestRealm")[1].by == SF.playerKey, "flags we raised on others move to our new name")
+
+	-- Broadcast now: our heartbeat comes back from the guild channel.
+	W.sent = {}
+	SF.Broadcast(true)
+	local mine
+	for _, s in ipairs(W.sent) do if s[2]:match("^H1|") then mine = s[2] end end
+	check(mine ~= nil, "heartbeat sent")
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", mine, "GUILD", "Tester Jack-TestRealm")
+	Fire("CHAT_MSG_ADDON", "SelfFound", mine, "GUILD", "Tester Jack")
+	check(SF.db.witness["Tester Jack-TestRealm"] == nil and #W.sent == 0, "our own echoed heartbeat is ignored (no record, no ack)")
+	-- ...even under a spelling we don't expect: only we can make our token.
+	Fire("CHAT_MSG_ADDON", "SelfFound", mine, "GUILD", "Tester Odd-TestRealm")
+	check(SF.db.witness["Tester Odd-TestRealm"] == nil and #W.sent == 0, "echo under another spelling is caught by our token")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|5|4000|1|0|0|0|abcd1234|WARRIOR|3", "GUILD", "Tester Odd-TestRealm")
+	check(SF.db.witness["Tester Odd-TestRealm"] == nil, "and that spelling stays ours for the session")
+	-- A real player with a matching token prefix but another session is someone else.
+	local body = mine:gsub("^H1|", "")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|5|4000|1|0|0|0|abcd1234|WARRIOR|3", "GUILD", "Bob Stone-TestRealm")
+	check(SF.db.witness["Bob Stone-TestRealm"] ~= nil, "other surnamed players are recorded", body)
+
+	-- Tooltip finds them by name + surname.
+	local lines = {}
+	local tip = NewMock("GameTooltip")
+	tip.GetUnit = function() return "Bob Stone", "mouseover" end
+	tip.AddLine = function(_, t) lines[#lines + 1] = t end
+	local realTooltip = _G.GameTooltip
+	_G.GameTooltip = tip
+	W.otherSurname = "Stone"
+	W.tooltipPost(tip)
+	W.otherSurname = nil
+	_G.GameTooltip = realTooltip
+	check(lines[1] and lines[1]:find("CLEAN", 1, true), "tooltip finds a surnamed player's record", table.concat(lines, " / "))
+
+	-- Searching by name
+	check(SF.ResolveName("bob stone") == "Bob Stone-TestRealm", "search: name + surname")
+	check(SF.ResolveName("  Bob   Stone - TestRealm ") == "Bob Stone-TestRealm", "search: spacing and realm")
+	check(SF.ResolveName("bob") == "Bob Stone-TestRealm", "search: a unique first name")
+	check(SF.ResolveName("tester jack") == SF.playerKey and SF.ResolveName("tester") == SF.playerKey, "search: yourself")
+	check(SF.ResolveName("new guy") == "New Guy-TestRealm", "search: unknown names are capitalised")
+	check(SF.ShortName("Bob Stone-TestRealm") == "Bob Stone", "short names keep the surname")
+
+	-- Group members' names include the surname (silence detection).
+	W.otherSurname = "Stone"
+	local realInRaid, realExists, realConnected = _G.IsInRaid, _G.UnitExists, _G.UnitIsConnected
+	_G.IsInRaid = function() return false end
+	_G.UnitExists = function(u) return u == "party1" end
+	_G.UnitIsConnected = function() return true end
+	local online = SF.OnlinePlayers()
+	_G.IsInRaid, _G.UnitExists, _G.UnitIsConnected = realInRaid, realExists, realConnected
+	W.otherSurname = nil
+	check(online["Bob Stone-TestRealm"], "group members are keyed with their surname")
+	check(#W.errors == 0, "surname paths run without errors", W.errors[1])
 end
 
 print(string.format("\n%d passed, %d failed, %d errors", pass, fail, #W.errors))

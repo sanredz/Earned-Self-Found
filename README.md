@@ -11,6 +11,8 @@ run, and lets other players vouch for it.
 > [Releases](https://github.com/sanredz/Earned-Self-Found/releases). Copies
 > uploaded anywhere else aren't official and may be modified.
 
+> **Beta:** Earned is new. If anything looks wrong (a status you didn't expect, a false warning), please [open an issue](https://github.com/sanredz/Earned-Self-Found/issues) and include what the Log tab shows.
+
 ![The Earned window showing a clean run](media/overview-clean.png)
 
 ## Features
@@ -76,15 +78,15 @@ Breaking one disqualifies the run on the spot:
 
 Grouping is allowed, and encouraged (see below).
 
-### Disconnects
+### Closing the game, disconnects and loading screens
 
-After a disconnect, the server keeps your character in the world for a
-short while, and `/played` keeps counting. That idle time (up to 3 minutes)
-is forgiven if your character is exactly as it was: same gold, level, XP,
-bags and gear. It's noted in the log.
+When you close the game without logging out, or disconnect, the server keeps
+your character in the world for a little while, and `/played` keeps counting.
+Earned recognises that time and doesn't hold it against you, so you don't need
+to log out in any special way.
 
-The other way around, time the addon didn't see counts **even if it's
-short** when the character changed in it. Your bank is checked too: it can
+Time the addon didn't see where your character clearly did something is
+different: that makes the run Unverified. Your bank is checked too: it can
 only change while it's open, so if it ever differs from how the addon last
 saw it, the run becomes Unverified.
 

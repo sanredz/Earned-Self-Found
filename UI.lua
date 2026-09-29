@@ -379,7 +379,7 @@ local function RefreshOverview(page)
 	local className, classFile = UnitClass("player")
 	local raceName = UnitRace("player")
 	local r, g, b = SF.ClassColor(classFile)
-	s.char:SetText(SF.Colorize(UnitName("player") or "?", { r, g, b }))
+	s.char:SetText(SF.Colorize(SF.ShortName(SF.playerKey), { r, g, b }))
 	s.info:SetText(string.format("Level %d %s %s", UnitLevel("player") or 0, raceName or "", className or ""))
 	s.since:SetText("Tracking since " .. SF.Date(run.created))
 

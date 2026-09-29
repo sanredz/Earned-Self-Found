@@ -199,8 +199,47 @@ function SF.FullName(name)
 	return name
 end
 
+-- WoW: Forever characters have surnames. There, UnitName returns
+-- (name, surname) and the server calls them "Name Surname-Realm" (addon
+-- message senders, the guild roster), so our keys must include the surname.
+-- Elsewhere the second return is the realm, and only for other realms.
+-- UnitName("player") never returns our own realm, so a second value there
+-- means surnames.
+function SF.Surnames()
+	if RegionalUniqueNamesEnabled and SF.Safe(SF.Try(RegionalUniqueNamesEnabled)) then
+		return true
+	end
+	local _, second = SF.Try(UnitName, "player")
+	second = SF.Safe(second)
+	return type(second) == "string" and second ~= ""
+end
+
+local function SurnameSeparator()
+	local consts = Constants and Constants.CharacterNameSeparatorConsts
+	local sep = consts and consts.CHARACTERNAME_SURNAME_SEPARATOR
+	return type(sep) == "string" and sep ~= "" and sep or " "
+end
+
+-- "Name[ Surname]-Realm" of a unit, the way the server names it.
+function SF.UnitKey(unit)
+	local name, second = SF.Try(UnitName, unit)
+	name, second = SF.Safe(name), SF.Safe(second)
+	if type(name) ~= "string" or name == "" then
+		return nil
+	end
+	if type(second) == "string" and second ~= "" then
+		local sep = SurnameSeparator()
+		if SF.Surnames() and not name:find(sep, 1, true) then
+			name = name .. sep .. second
+		else
+			name = name .. "-" .. second
+		end
+	end
+	return SF.FullName(name)
+end
+
 function SF.PlayerKey()
-	return SF.FullName(SF.Safe(UnitName("player")))
+	return SF.UnitKey("player")
 end
 
 function SF.ShortName(fullName)

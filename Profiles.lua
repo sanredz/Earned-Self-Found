@@ -26,7 +26,7 @@ local QUERY_WINDOW = 120     -- replies accepted this long after asking
 -- Who is online right now (guild roster + group)
 -- ---------------------------------------------------------------------------
 
-local function OnlinePlayers()
+function SF.OnlinePlayers()
 	local online = {}
 	if IsInGuild and IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo then
 		for i = 1, SF.Safe(SF.Try(GetNumGuildMembers)) or 0 do
@@ -41,10 +41,9 @@ local function OnlinePlayers()
 	for i = 1, raid and 40 or 4 do
 		local unit = (raid and "raid" or "party") .. i
 		if UnitExists and SF.Safe(UnitExists(unit)) and SF.Safe(UnitIsConnected(unit)) then
-			local name, realm = UnitName(unit)
-			name, realm = SF.Safe(name), SF.Safe(realm)
+			local name = SF.UnitKey(unit)
 			if name then
-				online[SF.FullName(realm and realm ~= "" and (name .. "-" .. realm) or name)] = true
+				online[name] = true
 			end
 		end
 	end
@@ -273,7 +272,7 @@ function SF.CheckSilence()
 		pcall(C_GuildInfo.GuildRoster) -- ask for a fresh roster for next time
 	end
 	local now = time()
-	local online = OnlinePlayers()
+	local online = SF.OnlinePlayers()
 	-- We can only judge silence after listening for a while ourselves, and
 	-- not while our own addon messaging is restricted.
 	local listening = now - SF.sessionId >= SILENT_AFTER and not SF.InMessagingLockdown()
@@ -672,21 +671,34 @@ end
 -- Turns typed text into a "Name-Realm" key: a player you know if one
 -- matches (case-insensitive), otherwise the name as WoW would write it.
 function SF.ResolveName(text)
-	text = type(text) == "string" and text:match("^%s*(.-)%s*$") or ""
-	if text == "" or text:find("[%s|]") then
+	-- Names can have a surname: "Name Surname[-Realm]".
+	text = type(text) == "string" and text:match("^%s*(.-)%s*$"):gsub("%s+", " "):gsub(" ?%- ?", "-") or ""
+	if text == "" or text:find("|", 1, true) then
 		return nil
 	end
 	local lower = text:lower()
-	if SF.playerKey and (SF.playerKey:lower() == lower or SF.ShortName(SF.playerKey):lower() == lower) then
-		return SF.playerKey
-	end
+	-- Exact matches first; a first name alone if only one player has it.
+	local names = { SF.playerKey }
 	for _, entry in ipairs(SF.KnownPlayers()) do
-		if entry.name:lower() == lower or SF.ShortName(entry.name):lower() == lower then
-			return entry.name
+		names[#names + 1] = entry.name
+	end
+	local byFirst
+	for _, name in ipairs(names) do
+		local short = SF.ShortName(name):lower()
+		if name:lower() == lower or short == lower then
+			return name
+		end
+		if short:match("^[^ %-]+") == lower and byFirst ~= name then
+			byFirst = byFirst == nil and name or false
 		end
 	end
+	if byFirst then
+		return byFirst
+	end
 	local name, realm = text:match("^([^%-]+)%-?(.*)$")
-	name = name:sub(1, 1):upper() .. name:sub(2):lower()
+	name = name:gsub("(%S)(%S*)", function(first, rest)
+		return first:upper() .. rest:lower()
+	end)
 	return SF.FullName(realm ~= "" and (name .. "-" .. realm) or name)
 end
 

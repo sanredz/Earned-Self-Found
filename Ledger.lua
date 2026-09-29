@@ -428,6 +428,7 @@ local function LoadRun()
 
 	EnsureCounters(SF.run)
 	SF.run.schema = SCHEMA
+	SF.run.char = SF.playerKey -- older versions left out the Forever surname
 
 	if not SF.integrity.ok and not SF.HasViolation("TAMPER") then
 		SF.Violation("TAMPER", "Saved data was changed outside the game (integrity check failed)")

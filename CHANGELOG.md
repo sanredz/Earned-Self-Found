@@ -56,10 +56,12 @@ First release.
   that `/run` can't reach, exposes no global handle, and checks every
   `/played` response. A sealed copy is saved every 15 seconds and on every
   violation, so disconnects lose almost nothing.
-- Disconnects: idle time after a disconnect (up to 3 minutes, while the
-  server keeps the character in the world) is forgiven when gold, level, XP,
-  bags and gear are unchanged. Untracked time where the character did change
-  counts even when it's short.
+- Closing the game, disconnects and loading screens: the time the server
+  keeps the character in the world is recognised and not held against the
+  run. Untracked time where the character did something counts, even when
+  it's short.
+- Players are identified by their full WoW: Forever name (first name and
+  surname), shown everywhere in the addon; you never witness yourself.
 - Player profiles: search for any player (with suggestions) or click one to
   see what your addon recorded over time, and ask every other witness in
   your guild and group what theirs recorded. Also `/sf check <name>` and "My

@@ -9,8 +9,8 @@ local ADDON, SF = ...
 local GAP_TOLERANCE = 45       -- seconds of unexplained /played drift we ignore
 local LATE_START_PLAYED = 300  -- runs started after this much /played are Unverified
 local TRACK_INTERVAL = 15
-local IDLE_GRACE = 180         -- max untracked seconds forgiven after a disconnect if nothing changed
-local GAP_NOISE = 10           -- below this, login/logout timing noise; above it, a changed character counts
+local IDLE_GRACE = 300         -- max untracked seconds forgiven at login if nothing was gained
+local GAP_NOISE = 10           -- below this, login/logout timing noise; above it, gaining gold/items counts
 
 -- ---------------------------------------------------------------------------
 -- Which NPC/UI interaction is open. Used to attribute gold changes, and by
@@ -443,8 +443,11 @@ local function UnmuteChatPlayed()
 	mutedFrames = {}
 end
 
+-- Asks the server for /played. Until the first answer of a session nothing
+-- is tracked (the whole session would look unwatched at the next login),
+-- so if no answer comes, ask again.
 local function RequestPlayed()
-	if not RequestTimePlayed then
+	if not RequestTimePlayed or sampleAt then
 		return
 	end
 	awaitingPlayed = true
@@ -452,54 +455,207 @@ local function RequestPlayed()
 	if not pcall(RequestTimePlayed) then
 		awaitingPlayed = false
 		UnmuteChatPlayed()
-		return
 	end
 	SF.After(10, function()
 		if awaitingPlayed then
 			awaitingPlayed = false
 			UnmuteChatPlayed()
 		end
+		if not sampleAt then
+			RequestPlayed()
+		end
 	end)
 end
 
--- Fingerprint of everything a trade, loot or purchase would change: gold,
--- level, XP, and exactly what's in the bags and equipped.
+-- ---------------------------------------------------------------------------
+-- Untracked time at login
+--
+-- At each login we compare the server's /played with what we last saved.
+-- Honest play leaves some untracked time: the loading screen before the
+-- addon loads, and above all the time the server keeps the character in
+-- the world after the game is closed without logging out (Alt+F4, a
+-- disconnect: about a minute). No addon can see that time.
+--
+-- So what matters is what happened to the character in it. Cheating with
+-- the addon off - a trade, mail, the auction house - changes its gold or
+-- gives it items. Lingering in the world can't spend or earn gold or gain
+-- items, and item info still loading at login only looks like missing
+-- items. So:
+--   gold changed / items gained, 10s+  -> counts (even a quick trade)
+--   otherwise, up to 5 minutes         -> forgiven (logged as routine)
+--   longer than that                   -> counts
+-- (Internal: don't spell this out in public docs.)
+-- ---------------------------------------------------------------------------
+
+-- What the character has: gold, level, XP, and how many of each item is in
+-- the bags, worn, or used as a bag (per item, so moving or equipping
+-- things changes nothing). "gold,level,xp;itemID:count,...". Also returns
+-- whether the game gave us everything (bags can still be loading).
 function SF.Snapshot()
-	local parts = {
-		tostring(SF.Safe(GetMoney())), tostring(SF.Safe(UnitLevel("player"))),
-		tostring(UnitXP and SF.Safe(UnitXP("player")) or 0),
-	}
+	local counts, complete = {}, true
+	local function Add(id, n)
+		id = tonumber(id)
+		if id then
+			counts[id] = (counts[id] or 0) + (tonumber(n) or 1)
+		end
+	end
 	local getInfo = C_Container and C_Container.GetContainerItemInfo
+	local getID = C_Container and C_Container.GetContainerItemID
 	local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+	local toInventory = C_Container and C_Container.ContainerIDToInventoryID
 	for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 do
-		for slot = 1, SF.Safe(SF.Try(numSlots, bag)) or 0 do
+		local slots = SF.Safe(SF.Try(numSlots, bag)) or 0
+		if bag > 0 and toInventory then
+			local invSlot = SF.Safe(SF.Try(toInventory, bag))
+			local bagItem = invSlot and GetInventoryItemID and SF.Safe(SF.Try(GetInventoryItemID, "player", invSlot))
+			if bagItem then
+				Add(bagItem, 1)
+				if slots == 0 then
+					complete = false -- a bag we can't see into yet
+				end
+			end
+		end
+		for slot = 1, slots do
 			local info = getInfo and SF.Try(getInfo, bag, slot)
 			if type(info) == "table" and not SF.IsSecret(info) then
-				parts[#parts + 1] = string.format("%s:%s:%s", bag * 100 + slot, tostring(SF.Safe(info.itemID)), tostring(SF.Safe(info.stackCount)))
+				Add(SF.Safe(info.itemID), SF.Safe(info.stackCount))
+			elseif getID and SF.Safe(SF.Try(getID, bag, slot)) then
+				complete = false -- an item whose details haven't loaded
 			end
 		end
 	end
 	for slot = 1, 19 do
-		local id = GetInventoryItemID and SF.Safe(SF.Try(GetInventoryItemID, "player", slot))
-		if id then
-			parts[#parts + 1] = "e" .. slot .. ":" .. tostring(id)
-		end
+		Add(GetInventoryItemID and SF.Safe(SF.Try(GetInventoryItemID, "player", slot)), 1)
 	end
-	return SF.Hash(table.concat(parts, ","))
+	local money = tonumber(SF.Safe(GetMoney()))
+	if not money then
+		complete = false
+	end
+	local ids = {}
+	for id in pairs(counts) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	for i, id in ipairs(ids) do
+		ids[i] = id .. ":" .. counts[id]
+	end
+	return string.format("%.0f,%d,%d;%s", money or 0, tonumber(SF.Safe(UnitLevel("player"))) or 0,
+		tonumber(UnitXP and SF.Safe(UnitXP("player"))) or 0, table.concat(ids, ",")), complete
 end
 
-local function UpdateTracked()
+local function ParseSnap(snap)
+	local money, level, xp, items = (type(snap) == "string" and snap or ""):match("^(%d+),(%d+),(%d+);(.*)$")
+	if not money then
+		return nil -- none, or the fingerprint of an older version
+	end
+	local s = { money = tonumber(money), level = tonumber(level), xp = tonumber(xp), items = {} }
+	for id, n in items:gmatch("(%d+):(%d+)") do
+		s.items[id] = tonumber(n)
+	end
+	return s
+end
+
+-- How `now` differs from `before` in ways only playing can explain:
+-- { goldUp, goldDown, items (more of some item) }, or nil if unknown. (XP
+-- isn't counted: a pet or a damage-over-time spell can still kill
+-- something while the character lingers after Alt+F4. Fewer items isn't:
+-- conjured items vanish while logged out.)
+function SF.SnapDiff(before, now)
+	local a, b = ParseSnap(before), ParseSnap(now)
+	if not a or not b then
+		return nil
+	end
+	local d = { goldUp = b.money > a.money, goldDown = b.money < a.money, items = false }
+	for id, n in pairs(b.items) do
+		if n > (a.items[id] or 0) then
+			d.items = true
+			break
+		end
+	end
+	return d
+end
+
+-- The most of everything in two snapshots.
+local function MaxSnap(a, b)
+	local x, y = ParseSnap(a), ParseSnap(b)
+	if not x or not y then
+		return b
+	end
+	for id, n in pairs(y.items) do
+		x.items[id] = math.max(x.items[id] or 0, n)
+	end
+	local ids = {}
+	for id in pairs(x.items) do
+		ids[#ids + 1] = tonumber(id)
+	end
+	table.sort(ids)
+	for i, id in ipairs(ids) do
+		ids[i] = id .. ":" .. x.items[tostring(id)]
+	end
+	local level, xp = x.level, x.xp
+	if y.level > level or (y.level == level and y.xp > xp) then
+		level, xp = y.level, y.xp
+	end
+	return string.format("%.0f,%d,%d;%s", math.max(x.money, y.money), level, xp, table.concat(ids, ","))
+end
+
+-- Keeps the saved snapshot current. A snapshot taken while the game hasn't
+-- given us everything isn't saved: missing items would look gained next
+-- time. At logout item info may already be unloading, so we keep the most
+-- of everything (the player can't act after logging out anyway).
+local function SaveSnap(atLogout)
+	local played = SF.run.played
+	local snap, complete = SF.Snapshot()
+	if atLogout then
+		played.snap = MaxSnap(played.snap, snap)
+	elseif complete or not ParseSnap(played.snap) then
+		played.snap = snap
+	end
+end
+
+local function UpdateTracked(atLogout)
 	if not SF.run then
 		return
 	end
-	-- Only after this session's first /played check, so the fingerprint from
+	-- Only after this session's first /played check, so the snapshot from
 	-- the previous session is still there to compare against.
 	if sampleAt then
 		SF.run.played.tracked = math.floor(GetTime() - sampleAt)
-		SF.run.played.snap = SF.Snapshot()
+		SaveSnap(atLogout)
 		SF.Commit()
 	end
 	SF.Publish()
+end
+
+-- The first /played of a session: account for the time since the last one.
+local function CheckLogin(run, total)
+	local played = run.played
+	local loadTime = GetTime() - (SF.loadedAt or GetTime())
+	local from = played.server + (played.tracked or 0)
+	local to = total - loadTime
+	local gap = to - from
+	-- Compare with how we last saved the character: right after entering
+	-- the world (before the player can act), and again now.
+	local saved = played.snap
+	local early, now = SF.SnapDiff(saved, loginSnap), SF.SnapDiff(saved, SF.Snapshot())
+	local found = {}
+	if (early and early.goldUp) or (now and now.goldUp) then
+		found[#found + 1] = "gained gold"
+	-- A drop only if both agree: gold read while still loading can't cause it.
+	elseif now and now.goldDown and (not early or early.goldDown) then
+		found[#found + 1] = "spent gold"
+	end
+	if (early and early.items) or (now and now.items) then
+		found[#found + 1] = "gained items"
+	end
+	if #found > 0 and gap >= GAP_NOISE then
+		-- Even a short gap counts: e.g. a quick trade with the addon off.
+		SF.AddGap(gap, table.concat(found, " and ") .. " while the addon wasn't running", from, to)
+	elseif gap > IDLE_GRACE then
+		SF.AddGap(gap, "the addon didn't see it: a crash, or played without the addon", from, to)
+	elseif gap >= GAP_TOLERANCE then
+		SF.Log("info", string.format("%s untracked while logging in or out (nothing changed), not counted", SF.Duration(gap)), true)
+	end
 end
 
 SF.On("TIME_PLAYED_MSG", function(total)
@@ -517,32 +673,9 @@ SF.On("TIME_PLAYED_MSG", function(total)
 
 	if not sampleAt then
 		played.sessions = (played.sessions or 0) + 1
+		run.pendingGap = nil -- from a development build
 		if played.server then
-			local loadTime = GetTime() - (SF.loadedAt or GetTime())
-			local from = played.server + (played.tracked or 0)
-			local to = total - loadTime
-			local gap = to - from
-			-- Compare the character with how we last saved it (gold, level,
-			-- XP, bags, gear). Taken right after entering the world, before
-			-- the player can act.
-			local now = loginSnap or SF.Snapshot()
-			local unchanged = played.snap ~= nil and played.snap == now
-			local changed = played.snap ~= nil and not unchanged
-			if changed and gap >= GAP_NOISE then
-				-- Something happened while the addon wasn't looking: even a
-				-- short gap counts (e.g. a quick trade with the addon off).
-				SF.AddGap(gap, "the character changed while the addon wasn't running", from, to)
-			elseif gap >= GAP_TOLERANCE then
-				-- After a disconnect the server keeps the character in the
-				-- world for a while, and /played keeps counting. If the gap is
-				-- short and the character is exactly as we saved it, nothing
-				-- happened: forgive it.
-				if unchanged and gap <= IDLE_GRACE then
-					SF.Log("info", string.format("%s of idle time after a disconnect (nothing about the character changed)", SF.Duration(gap)))
-				else
-					SF.AddGap(gap, "the addon didn't see it: a crash, or played without the addon", from, to)
-				end
-			end
+			CheckLogin(run, total)
 		else
 			run.startPlayed = total
 			local level = UnitLevel("player") or 1
@@ -563,17 +696,22 @@ SF.On("TIME_PLAYED_MSG", function(total)
 		end
 	end
 
+	local first = not sampleAt
 	played.server = total
 	played.tracked = 0
 	sampleAt = GetTime()
+	if first then
+		SaveSnap()
+	end
 	SF.Changed()
+	SF.Publish()
 end)
 
 SF.On("PLAYER_ENTERING_WORLD", function(isInitialLogin, isReloadingUi)
 	lastMoney = SF.Safe(GetMoney())
 	if isInitialLogin or isReloadingUi or not sampleAt then
-		-- Fingerprint the character before the player can do anything, for
-		-- the gap check when /played arrives.
+		-- Snapshot the character before the player can do anything, for
+		-- the check when /played arrives.
 		SF.After(1, function()
 			if not sampleAt then
 				loginSnap = SF.Snapshot()
@@ -592,15 +730,16 @@ SF.Listen("Ready", function()
 	end
 end)
 
--- Save again ~1s after anything the fingerprint covers changes, so what's
--- on disk (e.g. at a disconnect) matches the character almost exactly.
+-- Save again as soon as anything the snapshot covers changes (next frame,
+-- once the game has applied it), so what's saved when the game closes
+-- matches the character.
 local saveQueued = false
 local function QueueSave()
 	if saveQueued or not sampleAt then
 		return
 	end
 	saveQueued = true
-	SF.After(1, function()
+	SF.After(0, function()
 		saveQueued = false
 		UpdateTracked()
 	end)
@@ -609,7 +748,9 @@ for _, event in ipairs({ "PLAYER_MONEY", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT
 	SF.On(event, QueueSave)
 end
 
-SF.Listen("BeforeSave", UpdateTracked)
+SF.Listen("BeforeSave", function()
+	UpdateTracked(true)
+end)
 
 -- ---------------------------------------------------------------------------
 -- Net worth: gold plus vendor value of everything you own
