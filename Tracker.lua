@@ -352,7 +352,8 @@ end)
 
 local cursorItem
 
-SF.On("CURSOR_CHANGED", function()
+-- Remembers what's on the cursor right now (nil if nothing).
+local function ReadCursor()
 	cursorItem = nil
 	if C_Cursor and C_Cursor.GetCursorItem and C_Item then
 		local location = SF.Try(C_Cursor.GetCursorItem)
@@ -368,7 +369,18 @@ SF.On("CURSOR_CHANGED", function()
 			cursorItem = { link = SF.Safe(link), count = 1 }
 		end
 	end
-end)
+end
+
+SF.On("CURSOR_CHANGED", ReadCursor)
+
+-- Also read it right after anything picks an item up: addons like
+-- QuickTrash pick up and delete in the same instant, before CURSOR_CHANGED
+-- arrives.
+if C_Container then
+	SF.Hook(C_Container, "PickupContainerItem", ReadCursor)
+end
+SF.Hook("PickupContainerItem", ReadCursor)
+SF.Hook("PickupInventoryItem", ReadCursor)
 
 local function OnDelete()
 	local item = cursorItem

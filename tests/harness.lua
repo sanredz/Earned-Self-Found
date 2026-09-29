@@ -264,6 +264,7 @@ local function InstallStubs()
 	W.bags = W.bags or { [0] = { [1] = { "|Hitem:2589::|h[Linen Cloth]|h", 5 } } }
 	_G.GetInventoryItemLink = function() return nil end
 	_G.GetInventoryItemID = function() return nil end
+	_G.DeleteCursorItem = function() end
 	W.roster = W.roster or {}
 	_G.GetNumGuildMembers = function() return #W.roster end
 	_G.GetGuildRosterInfo = function(i) local m = W.roster[i]; if m then return m.name, "Member", 1, 10, "Warrior", "Elwynn", "", "", m.online end end
@@ -496,6 +497,25 @@ _G.C_Item.GetStackCount = function() return 2 end
 Fire("CURSOR_CHANGED")
 C_Item.DeleteCursorItem()
 check(run.items.destroyedCount == 2 and run.items.destroyedValue == 26, "destroyed item counted", run.items.destroyedCount)
+
+-- QuickTrash-style: pick up and delete in the same instant; CURSOR_CHANGED
+-- only arrives afterwards (when the cursor is already empty)
+do
+	local held
+	_G.C_Cursor.GetCursorItem = function() return held end
+	_G.C_Item.GetItemLink = function(loc) return loc.link end
+	_G.C_Item.GetStackCount = function(loc) return loc.count end
+	Fire("CURSOR_CHANGED")                -- cursor empty
+	held = { IsValid = function() return true end, link = "|Hitem:117::|h[Tough Jerky]|h", count = 3 }
+	C_Container.PickupContainerItem(0, 1) -- picks it up...
+	DeleteCursorItem()                    -- ...and deletes it right away
+	held = nil
+	Fire("CURSOR_CHANGED")                -- the event arrives late
+	local last = SF.cdb.log[#SF.cdb.log]
+	check(run.items.destroyedCount == 5 and last.k == "destroy" and last.x == 1 and last.m:find("Tough Jerky", 1, true), "same-instant pickup + delete is recorded (routine log entry)", run.items.destroyedCount)
+	DeleteCursorItem()
+	check(run.items.destroyedCount == 5, "no double counting")
+end
 
 -- Mail: own returned mail and AH mail are fine
 W.inbox[1] = { sender = "Tester", returned = true, canReply = true }
