@@ -11,6 +11,8 @@ run, and lets other players vouch for it.
 > [Releases](https://github.com/sanredz/Earned-Self-Found/releases). Copies
 > uploaded anywhere else aren't official and may be modified.
 
+![The Earned window showing a clean run](media/overview-clean.png)
+
 ## Features
 
 - **Run status:** CLEAN, UNVERIFIED or DISQUALIFIED, shown in the window, on
@@ -41,6 +43,14 @@ run, and lets other players vouch for it.
   own returned mail, NPC mail and auction house mail are fine.
 - Withdrawing items or gold from a guild bank or Warband bank.
 - Editing the addon's saved data outside the game.
+
+A warning appears before you can break a rule by accident:
+
+![Warning banner above the trade window](media/trade-warning.png)
+
+Breaking one disqualifies the run on the spot:
+
+![Disqualification alert](media/disqualified.png)
 
 **Marks the run Unverified:**
 - Play time the addon didn't see (it was disabled or uninstalled, or the game
