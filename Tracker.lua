@@ -9,6 +9,7 @@ local ADDON, SF = ...
 local GAP_TOLERANCE = 45       -- seconds of unexplained /played drift we ignore
 local LATE_START_PLAYED = 300  -- runs started after this much /played are Unverified
 local TRACK_INTERVAL = 15
+local IDLE_GRACE = 180         -- max untracked seconds forgiven after a disconnect if nothing changed
 
 -- ---------------------------------------------------------------------------
 -- Which NPC/UI interaction is open. Used to attribute gold changes, and by
@@ -447,11 +448,44 @@ local function RequestPlayed()
 	end)
 end
 
+-- Fingerprint of everything a trade, loot or purchase would change: gold,
+-- level, XP, and exactly what's in the bags and equipped.
+function SF.Snapshot()
+	local parts = {
+		tostring(SF.Safe(GetMoney())), tostring(SF.Safe(UnitLevel("player"))),
+		tostring(UnitXP and SF.Safe(UnitXP("player")) or 0),
+	}
+	local getInfo = C_Container and C_Container.GetContainerItemInfo
+	local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+	for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 do
+		for slot = 1, SF.Safe(SF.Try(numSlots, bag)) or 0 do
+			local info = getInfo and SF.Try(getInfo, bag, slot)
+			if type(info) == "table" and not SF.IsSecret(info) then
+				parts[#parts + 1] = string.format("%s:%s:%s", bag * 100 + slot, tostring(SF.Safe(info.itemID)), tostring(SF.Safe(info.stackCount)))
+			end
+		end
+	end
+	for slot = 1, 19 do
+		local id = GetInventoryItemID and SF.Safe(SF.Try(GetInventoryItemID, "player", slot))
+		if id then
+			parts[#parts + 1] = "e" .. slot .. ":" .. tostring(id)
+		end
+	end
+	return SF.Hash(table.concat(parts, ","))
+end
+
 local function UpdateTracked()
-	if sampleAt and SF.run then
+	if not SF.run then
+		return
+	end
+	-- Only after this session's first /played check, so the fingerprint from
+	-- the previous session is still there to compare against.
+	if sampleAt then
 		SF.run.played.tracked = math.floor(GetTime() - sampleAt)
+		SF.run.played.snap = SF.Snapshot()
 		SF.Commit()
 	end
+	SF.Publish()
 end
 
 SF.On("TIME_PLAYED_MSG", function(total)
@@ -475,7 +509,15 @@ SF.On("TIME_PLAYED_MSG", function(total)
 			local to = total - loadTime
 			local gap = to - from
 			if gap >= GAP_TOLERANCE then
-				SF.AddGap(gap, "the addon didn't see it: a crash, or played without the addon", from, to)
+				-- After a disconnect the server keeps the character in the
+				-- world for a while, and /played keeps counting. If the gap is
+				-- short and the character is exactly as we last saved it (gold,
+				-- level, XP, bags, gear), nothing happened: forgive it.
+				if gap <= IDLE_GRACE and played.snap and played.snap == SF.Snapshot() then
+					SF.Log("info", string.format("%s of idle time after a disconnect (nothing about the character changed)", SF.Duration(gap)))
+				else
+					SF.AddGap(gap, "the addon didn't see it: a crash, or played without the addon", from, to)
+				end
 			end
 		else
 			run.startPlayed = total

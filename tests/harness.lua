@@ -260,6 +260,8 @@ local function InstallStubs()
 	}
 	W.bags = W.bags or { [0] = { [1] = { "|Hitem:2589::|h[Linen Cloth]|h", 5 } } }
 	_G.GetInventoryItemLink = function() return nil end
+	_G.GetInventoryItemID = function() return nil end
+	_G.UnitXP = function() return W.xp or 0 end
 	_G.C_AuctionHouse = {
 		PlaceBid = function() end,
 		GetAuctionInfoByID = function() return { buyoutAmount = 5000 } end,
@@ -370,6 +372,11 @@ end
 
 local function Logout()
 	Fire("PLAYER_LOGOUT")
+	return SaveVars()
+end
+
+-- Worst case for a disconnect: the game saves without PLAYER_LOGOUT firing.
+local function Disconnect()
 	return SaveVars()
 end
 
@@ -1035,7 +1042,7 @@ do
 	local saved = Logout()
 	check(saved.cdb:find('"key"', 1, true) ~= nil, "secret key is saved with the character")
 	Boot(saved, { played = ServerPlayed() })
-	check(SelfFoundCharDB.key == nil and type(SF.cdb.key) == "string", "secret key not reachable from chat during play")
+	check(type(SF.cdb.key) == "string" and SF.cdb.key == SelfFoundCharDB.key, "secret key kept across sessions")
 
 	-- TEMPORARY /sf preview clean: display only, never shared
 	SlashCmdList.SELFFOUND("preview clean")
@@ -1058,6 +1065,53 @@ do
 	saved = Logout()
 	Boot(saved, { played = ServerPlayed() })
 	check(SF.GetStatus() == "DISQUALIFIED" and SF.integrity.ok, "/run edit has no effect after relog")
+
+	-- /run edit, then disconnect before the addon's next save: the edited
+	-- copy gets saved, but it no longer matches the seal
+	SelfFoundCharDB.run.violations = {}
+	saved = Disconnect()
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.HasViolation("TAMPER") and SF.GetStatus() == "DISQUALIFIED", "/run edit + disconnect is caught as tampering")
+
+	-- Disconnects (the game may save without PLAYER_LOGOUT)
+	Fresh()
+	Advance(100)
+	C_AuctionHouse.PostItem({})           -- a violation right before the disconnect...
+	saved = Disconnect()
+	Advance(60)                           -- server keeps the character in the world
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.HasViolation("AUCTION"), "...is saved even if PLAYER_LOGOUT never fires")
+
+	Fresh()
+	Advance(100)
+	saved = Disconnect()                  -- last 15s save was up to 10s ago
+	Advance(60)                           -- idle linger after the disconnect
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0 and SF.integrity.ok, "idle time after a disconnect is forgiven", select(2, SF.GetStatus()))
+	check(SF.cdb.log[#SF.cdb.log].m:find("idle time after a disconnect", 1, true) ~= nil, "forgiven idle time is logged")
+
+	Advance(100)
+	saved = Disconnect()
+	Advance(60)
+	W.money = W.money + 5000              -- received gold while the addon wasn't looking
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "UNVERIFIED", "short gap with changed gold is not forgiven")
+
+	Fresh()
+	Advance(100)
+	saved = Disconnect()
+	Advance(60)
+	W.bags[0][2] = { "|Hitem:117::|h[Tough Jerky]|h", 1 } -- received an item
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "UNVERIFIED", "short gap with changed bags is not forgiven")
+	W.bags[0][2] = nil
+
+	Fresh()
+	Advance(100)
+	saved = Disconnect()
+	Advance(400)                          -- too long to be a linger, even if idle
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "UNVERIFIED", "long gap is never forgiven")
 
 	-- Faking the first /played response to hide time played without the addon
 	Fresh()

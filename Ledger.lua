@@ -163,6 +163,7 @@ function SF.Violation(code, text)
 	end
 	table.insert(SF.run.violations, { t = time(), c = code, m = text })
 	SF.Log("violation", text)
+	SF.Publish() -- saved right away, even if the game disconnects next
 	SF.Fire("Violation", code, text)
 	SF.Fire("StatusChanged")
 end
@@ -432,12 +433,9 @@ SF.On("ADDON_LOADED", function(name)
 	SelfFoundCharDB = type(SelfFoundCharDB) == "table" and SelfFoundCharDB or {}
 	SF.db = SelfFoundDB
 	-- Work on a PRIVATE copy of the run. The saved-variable global is
-	-- reachable from chat (/run); edits to it have no effect, because it's
-	-- replaced with our copy at logout. (If that ever failed, the untouched
-	-- original from login would be saved: consistent, just missing this
-	-- session, which then shows as untracked time.)
+	-- reachable from chat (/run), so it only ever receives copies of our
+	-- data (SF.Publish); edits to it are overwritten or break the seal.
 	SF.cdb = SF.Copy(SelfFoundCharDB)
-	SelfFoundCharDB.key = nil
 	SF.db.settings = SF.db.settings or {}
 	ApplyDefaults(SF.db.settings, DEFAULT_SETTINGS)
 	SF.db.settings.broadcast = nil -- removed option; sharing is always on
@@ -446,9 +444,22 @@ SF.On("ADDON_LOADED", function(name)
 	SF.loadedAt = GetTime()
 end)
 
+-- Writes a fresh, sealed copy of our private data to the saved-variable
+-- global. Done at login, every 15s (Tracker), on violations and at logout,
+-- so whatever the game saves - including on a disconnect that might skip
+-- PLAYER_LOGOUT - is at most seconds old. A /run edit of the global is
+-- overwritten by the next publish, or, if it gets saved first, no longer
+-- matches the seal and is caught as tampering on the next login.
+function SF.Publish()
+	if SF.run and SF.cdb then
+		SelfFoundCharDB = SF.Copy(SF.cdb)
+	end
+end
+
 SF.On("PLAYER_LOGIN", function()
 	SF.playerKey = SF.PlayerKey()
 	LoadRun()
+	SF.Publish()
 	SF.ready = true
 	SF.Fire("Ready")
 	SF.Fire("StatusChanged")
@@ -460,5 +471,5 @@ SF.On("PLAYER_LOGOUT", function()
 	end
 	SF.Fire("BeforeSave")
 	SF.Commit()
-	SelfFoundCharDB = SF.cdb -- the only moment our private copy becomes the saved one
+	SF.Publish()
 end)

@@ -44,7 +44,11 @@ First release.
   tooltips, the minimap button and reports.
 - Chat-command protection: the addon works on a private copy of its data
   that `/run` can't reach, exposes no global handle, and checks every
-  `/played` response.
+  `/played` response. A sealed copy is saved every 15 seconds and on every
+  violation, so disconnects lose almost nothing.
+- Disconnects: idle time after a disconnect (up to 3 minutes, while the
+  server keeps the character in the world) is forgiven when gold, level, XP,
+  bags and gear are unchanged.
 - Unforgeable sightings: heartbeats carry a token derived from a per-run
   secret key. Crash recoveries and disputes need a sighting that echoes a
   real token.

@@ -67,6 +67,13 @@ Breaking one disqualifies the run on the spot:
 
 Grouping is allowed, and encouraged (see below).
 
+### Disconnects
+
+After a disconnect, the server keeps your character in the world for a
+short while, and `/played` keeps counting. That idle time (up to 3 minutes)
+is forgiven if your character is exactly as it was: same gold, level, XP,
+bags and gear. It's noted in the log.
+
 ### Crashes: recovered by witnesses
 
 The game only saves addon data when you log out or `/reload`, so a hard crash
@@ -151,7 +158,9 @@ their code and saved data sit on the player's computer. Earned makes cheating
 - The event log is hash-chained and all saved data is sealed. Editing the file
   by hand is detected and disqualifies the run.
 - While you play, the addon works on a private copy of its data that chat
-  commands (`/run`) can't reach, and only writes it out when you log out.
+  commands (`/run`) can't reach. Every 15 seconds it saves a sealed copy, so
+  a disconnect loses almost nothing, and chat edits to that copy are either
+  overwritten or caught as tampering.
 - Your status is sent to witnesses about a second after a violation. Those
   records live on *their* computers, so deleting or editing your own data
   doesn't erase what they saw.
