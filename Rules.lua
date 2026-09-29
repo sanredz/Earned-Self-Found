@@ -70,7 +70,8 @@ local function CreateAlert()
 	alert:Hide()
 end
 
-SF.Listen("Violation", function(code, text)
+-- Shows the big red alert. Also used by /sf preview (with sample text).
+function SF.ShowAlert(text)
 	if not alert then
 		CreateAlert()
 	end
@@ -81,6 +82,10 @@ SF.Listen("Violation", function(code, text)
 	if PlaySound then
 		pcall(PlaySound, (SOUNDKIT and SOUNDKIT.RAID_WARNING) or 8959)
 	end
+end
+
+SF.Listen("Violation", function(code, text)
+	SF.ShowAlert(text)
 	SF.Print(SF.Colorize("DISQUALIFIED", SF.COLOR.DISQUALIFIED) .. " - " .. text)
 end)
 

@@ -1129,12 +1129,25 @@ SlashCmdList.SELFFOUND = function(msg)
 	elseif msg == "broadcast" then
 		SF.Broadcast(true)
 		SF.Print("Sent your progress to guild and group members running " .. SF.NAME .. ".")
+	elseif msg == "preview" then
+		-- Display-only samples (for screenshots/testing): never saved, never
+		-- sent to other players, gone after /reload.
+		if SF.preview then
+			SF.preview = nil
+			SF.Print("Preview off.")
+		else
+			SF.preview = { disputes = 1 }
+			SF.ShowAlert("Preview: Completed a trade with Someone (received 1 copper)")
+			SF.Print("Preview on: showing the disqualification alert and a sample dispute. Nothing is saved or shared. Type /sf preview again (or /reload) to turn it off.")
+		end
+		SF.Fire("StatusChanged")
 	else
 		SF.Print(string.format("%s %s - official download: %s", SF.TITLE, SF.VERSION, SF.WEBSITE))
 		SF.Print("/sf - open the window")
 		SF.Print("/sf status - print your run status")
 		SF.Print("/sf share - share your report   /sf verify - verify someone's report")
 		SF.Print("/sf minimap - show/hide the minimap button")
+		SF.Print("/sf preview - preview the disqualification alert and a dispute (nothing is saved)")
 	end
 end
 

@@ -37,7 +37,7 @@ end
 local function HeartbeatBody()
 	local run = SF.run
 	local _, _, code = SF.GetStatus()
-	local tier, pct, _, disputes = SF.WitnessRating()
+	local tier, pct, _, disputes = SF.WitnessRating(true)
 	return table.concat({
 		code,
 		UnitLevel("player") or 0,
@@ -395,7 +395,9 @@ function SF.DisputeCount()
 end
 
 -- Returns tier (0-3), witnessed %, distinct witnesses, disputes.
-function SF.WitnessRating()
+-- `real` = true for anything shared or exported (heartbeats, reports): it
+-- ignores /sf preview's sample data, which is display-only.
+function SF.WitnessRating(real)
 	local pct = SF.WitnessCoverage()
 	local witnesses = 0
 	for _ in pairs(SF.run.witnessedBy) do
@@ -408,7 +410,11 @@ function SF.WitnessRating()
 			break
 		end
 	end
-	return tier, pct, witnesses, SF.DisputeCount()
+	local disputes = SF.DisputeCount()
+	if not real and SF.preview then
+		disputes = disputes + SF.preview.disputes
+	end
+	return tier, pct, witnesses, disputes
 end
 
 -- "Well witnessed" (colored), plus "(1 disputed)" if any.
@@ -510,7 +516,7 @@ end
 function SF.BuildReport()
 	local run = SF.run
 	local status, reason = SF.GetStatus()
-	local rating, witnessedPct, _, disputes = SF.WitnessRating()
+	local rating, witnessedPct, _, disputes = SF.WitnessRating(true)
 	local witnesses = {}
 	for i, w in ipairs(SF.WitnessList()) do
 		if i > 25 then

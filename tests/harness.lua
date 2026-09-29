@@ -961,6 +961,21 @@ do
 	check(SF.ReportSummary(r):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "report summary shows the rating")
 	check(table.concat(select(2, SF.VerifyReport(r)), " "):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "Verify shows the rating")
 
+	-- /sf preview: display-only sample dispute + alert, never shared or saved
+	local sealBefore = SelfFoundCharDB.seal
+	SlashCmdList.SELFFOUND("preview")
+	check(select(4, SF.WitnessRating()) == 1, "preview shows a sample dispute")
+	check(select(4, SF.WitnessRating(true)) == 0 and SF.BuildReport().disputes == 0, "preview dispute never reaches reports")
+	W.sent = {}
+	SF.Broadcast(true)
+	local previewLeak = false
+	for _, s in ipairs(W.sent) do if s[2]:match("^H1|") and not s[2]:match("|0$") then previewLeak = true end end
+	check(not previewLeak, "preview dispute never sent in heartbeats")
+	check(SelfFoundCharDB.seal == sealBefore and SF.GetStatus() ~= "DISQUALIFIED" and #SF.run.violations == 0, "preview changes no saved data")
+	check(SelfFoundAlert and SelfFoundAlert:IsShown(), "preview shows the DQ alert")
+	SlashCmdList.SELFFOUND("preview")
+	check(SF.preview == nil and select(4, SF.WitnessRating()) == 0, "preview toggles off")
+
 	-- Sealed and persisted
 	local saved = Logout()
 	Boot(saved, { played = ServerPlayed() })

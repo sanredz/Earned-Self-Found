@@ -136,6 +136,7 @@ run, e.g. **CLEAN · Well witnessed**:
 | `/sf verify` | Verify someone else's report |
 | `/sf minimap` | Show or hide the minimap button |
 | `/sf broadcast` | Send your status to guild and group now |
+| `/sf preview` | Preview the disqualification alert and a sample dispute. Nothing is saved or shared; type it again or `/reload` to turn it off. |
 
 ## How trustworthy is it?
 
