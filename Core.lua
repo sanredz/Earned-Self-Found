@@ -4,7 +4,8 @@
 -- tamper-evident.
 
 local ADDON, SF = ...
-SelfFound = SF
+-- SF is deliberately NOT exposed as a global: chat commands (/run) must not
+-- be able to reach the addon's live data or functions.
 
 SF.ADDON = ADDON
 -- The version comes from the TOC, which the release packager stamps from the
@@ -117,6 +118,18 @@ function SF.Hook(tbl, name, fn)
 		SF.SafeCall(fn, ...)
 	end)
 	return true
+end
+
+-- Deep copy of plain data tables.
+function SF.Copy(value)
+	if type(value) ~= "table" then
+		return value
+	end
+	local out = {}
+	for k, v in pairs(value) do
+		out[k] = SF.Copy(v)
+	end
+	return out
 end
 
 function SF.After(seconds, fn)

@@ -612,9 +612,21 @@ do
 	end
 	check(recall, "recall request sent to guild")
 
-	local function Cover(seen, status, violations, who)
-		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|%s|%d|0|0", gap.from, seen, status or "C", violations or 0), "WHISPER", who or "Bob")
+	-- Honest witnesses echo the token from the heartbeat they really saw;
+	-- tests stand in for "our addon sent that heartbeat before the crash".
+	local function Cover(seen, status, violations, who, token)
+		status, violations = status or "C", violations or 0
+		token = token or SF.Token(seen, status, violations)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|%s|%d|0|0|%s", gap.from, seen, status, violations, token), "WHISPER", who or "Bob")
 	end
+
+	-- Forgery: a friend making up a sighting (no real heartbeat behind it)
+	Cover(gap.to - 30, "C", 0, "Bob", "deadbeef")
+	check(not gap.cov and not (gap.seen and gap.seen["Bob-TestRealm"]), "made-up sighting (wrong token) ignored")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|C|0|0|0", gap.from, gap.to - 30), "WHISPER", "Bob")
+	check(not gap.cov, "sighting without a token ignored")
+	Cover(gap.to - 30, "D", 1, "Bob", SF.Token(gap.to - 30, "C", 0))
+	check(not (gap.seen and gap.seen["Bob-TestRealm"]), "a real clean heartbeat's token can't back a fake DQ claim")
 	Cover(gap.to - 200)
 	check(SF.GetStatus() == "UNVERIFIED" and not gap.cov, "last sighting too long before the crash: not recovered")
 	Cover(gap.from)
@@ -632,12 +644,13 @@ do
 	check(not SF.run.witnessedBy["Stranger-TestRealm"], "stranger can't pose as our witness")
 	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|60|999999|0|0|0|0|abcd1234|ROGUE|0", "WHISPER", "Stranger")
 	check(not SelfFoundDB.witness["Stranger-TestRealm"], "heartbeats only accepted from guild/group channels")
-	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|C|0|0|0", gap.from, gap.to - 30), "GUILD", "Bob")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|C|0|0|0|%s", gap.from, gap.to - 30, SF.Token(gap.to - 30, "C", 0)), "GUILD", "Bob")
 	check(not gap.cov, "sightings only accepted as whispers")
 
-	-- A known witness claiming a DQ: recorded with their name, never enforced
+	-- A witness proving our addon broadcast a DQ before the crash (valid
+	-- token): recorded under their name as a dispute, not enforced
 	Cover(gap.to - 30, "D", 1, "Carl")
-	check(not gap.cov and SF.GetStatus() == "UNVERIFIED" and #SF.run.violations == 0, "witness claiming a DQ can't recover it or disqualify")
+	check(not gap.cov and SF.GetStatus() == "UNVERIFIED" and #SF.run.violations == 0, "proven DQ sighting blocks recovery, doesn't disqualify")
 	check(gap.seen["Carl-TestRealm"] and gap.seen["Carl-TestRealm"].s == "D", "the claim is recorded under the witness's name")
 	check(SF.LogCount() == logBefore, "witness claims never go into your log")
 	local _, dispute = SF.GapWitnesses(gap)
@@ -659,7 +672,7 @@ do
 	check(noted:find("confirmed by 2 witnesses", 1, true) and noted:find("1 witness claims a violation", 1, true), "Verify shows confirmations and claims", noted)
 	check(SF.GetStatus() == "CLEAN", "recovered crash => CLEAN", select(2, SF.GetStatus()))
 	check(select(2, SF.GetStatus()):find("1 crash recovered", 1, true) ~= nil, "CLEAN reason mentions the recovered crash")
-	check(SelfFoundCharDB.log[#SelfFoundCharDB.log].k == "recover", "recovery logged")
+	check(SF.cdb.log[#SF.cdb.log].k == "recover", "recovery logged")
 	check(SF.GapTotal() == gap.s and SF.OpenGapTotal() == 0, "raw gap total kept, open total cleared")
 	local r = SF.BuildReport()
 	check(r.gapTotal == gap.s and r.gapOpen == 0, "report carries raw and open gap totals")
@@ -688,7 +701,7 @@ check(beats >= 1, "heartbeat at least every 60s", beats)
 -- Witness side: answering someone else's recall
 do
 	local function Beat(who, pl, sid)
-		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|C|10|%d|0|0|0|0|abcd1234|MAGE|5%s", pl, sid and ("|" .. sid .. "|1.0.0") or ""), "GUILD", who)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|C|10|%d|0|0|0|0|abcd1234|MAGE|5%s", pl, sid and ("|" .. sid .. "|1.0.0|1|20|0|tk" .. pl) or ""), "GUILD", who)
 	end
 	Beat("Dana", 5000, 100)
 	Advance(60); Beat("Dana", 5060, 100)
@@ -699,7 +712,8 @@ do
 
 	W.sent = {}
 	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|4000|5090", "GUILD", "Dana")
-	check(#W.sent == 1 and W.sent[1][3] == "WHISPER" and W.sent[1][4] == "Dana-TestRealm" and W.sent[1][2]:match("^C1|4000|5060|C|"), "recall answered with last sighting in range", W.sent[1] and W.sent[1][2])
+	check(#W.sent == 1 and W.sent[1][3] == "WHISPER" and W.sent[1][4] == "Dana-TestRealm" and W.sent[1][2]:match("^C1|4000|5060|C|") and W.sent[1][2]:match("|tk5060$"),
+		"recall answered with last sighting in range, echoing its token", W.sent[1] and W.sent[1][2])
 	W.sent = {}
 	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|4000|5090", "GUILD", "Dana")
 	check(#W.sent == 0, "repeat recall throttled")
@@ -883,7 +897,7 @@ check(SF.GetStatus() == "UNVERIFIED" and SF.run.lateStart.level == 10, "late ins
 
 Fresh()
 for i = 1, 4200 do SF.Log("info", "entry " .. i, true) end
-check(#SelfFoundCharDB.log <= 4000 and SF.LogCount() == 4201, "log trimmed, count kept", #SelfFoundCharDB.log .. " / " .. SF.LogCount())
+check(#SF.cdb.log <= 4000 and SF.LogCount() == 4201, "log trimmed, count kept", #SF.cdb.log .. " / " .. SF.LogCount())
 local trimmed = Logout()
 Boot(trimmed, { played = ServerPlayed() })
 check(SF.integrity.ok, "trimmed log verifies after reload")
@@ -962,16 +976,22 @@ do
 	check(table.concat(select(2, SF.VerifyReport(r)), " "):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "Verify shows the rating")
 
 	-- /sf preview: display-only sample dispute + alert, never shared or saved
-	local sealBefore = SelfFoundCharDB.seal
+	local sealBefore = SF.cdb.seal
 	SlashCmdList.SELFFOUND("preview")
 	check(select(4, SF.WitnessRating()) == 1, "preview shows a sample dispute")
 	check(select(4, SF.WitnessRating(true)) == 0 and SF.BuildReport().disputes == 0, "preview dispute never reaches reports")
 	W.sent = {}
 	SF.Broadcast(true)
 	local previewLeak = false
-	for _, s in ipairs(W.sent) do if s[2]:match("^H1|") and not s[2]:match("|0$") then previewLeak = true end end
+	for _, s in ipairs(W.sent) do
+		if s[2]:match("^H1|") then
+			local f = {}
+			for x in (s[2] .. "|"):gmatch("(.-)|") do f[#f + 1] = x end
+			if f[16] ~= "0" then previewLeak = true end -- body field 15 = disputes
+		end
+	end
 	check(not previewLeak, "preview dispute never sent in heartbeats")
-	check(SelfFoundCharDB.seal == sealBefore and SF.GetStatus() ~= "DISQUALIFIED" and #SF.run.violations == 0, "preview changes no saved data")
+	check(SF.cdb.seal == sealBefore and SF.GetStatus() ~= "DISQUALIFIED" and #SF.run.violations == 0, "preview changes no saved data")
 	check(SelfFoundAlert and SelfFoundAlert:IsShown(), "preview shows the DQ alert")
 	SlashCmdList.SELFFOUND("preview")
 	check(SF.preview == nil and select(4, SF.WitnessRating()) == 0, "preview toggles off")
@@ -998,6 +1018,54 @@ do
 	check(tier == 1 and pct >= 75, "fully witnessed by a single player => only Lightly witnessed", tier .. " " .. pct)
 	for _, n in ipairs({ "Pa", "Pb" }) do Known(n); Ack(n) end
 	check(SF.WitnessRating() == 2, "three witnesses => Well witnessed")
+end
+
+-- ---------------------------------------------------------------------------
+-- 10. Chat-command (/run) attacks
+-- ---------------------------------------------------------------------------
+
+Fresh()
+do
+	check(_G.SelfFound == nil, "no global handle to the addon's internals")
+
+	-- Get disqualified, relog, then try to erase it from chat
+	C_AuctionHouse.PostItem({})
+	check(SF.GetStatus() == "DISQUALIFIED", "setup: disqualified")
+	Advance(30)
+	local saved = Logout()
+	check(saved.cdb:find('"key"', 1, true) ~= nil, "secret key is saved with the character")
+	Boot(saved, { played = ServerPlayed() })
+	check(SelfFoundCharDB.key == nil and type(SF.cdb.key) == "string", "secret key not reachable from chat during play")
+
+	SelfFoundCharDB.run.violations = {}   -- /run SelfFoundCharDB.run.violations = {}
+	SelfFoundCharDB.run.gaps = {}
+	SelfFoundCharDB.log = {}
+	Advance(30)                           -- the addon's regular saves run in between
+	check(SF.GetStatus() == "DISQUALIFIED", "/run edit has no effect in-session")
+	saved = Logout()
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "DISQUALIFIED" and SF.integrity.ok, "/run edit has no effect after relog")
+
+	-- Faking the first /played response to hide time played without the addon
+	Fresh()
+	Advance(60)
+	saved = Logout()
+	local expected = ServerPlayed()
+	Advance(3600)                         -- an hour played with the addon disabled
+	Boot(saved, {})                       -- the real /played answer is still in flight...
+	Fire("TIME_PLAYED_MSG", expected + 4, expected + 4) -- ...and a faked one arrives first
+	check(SF.GetStatus() == "CLEAN", "setup: faked /played hid the gap at first")
+	Advance(30)
+	Fire("TIME_PLAYED_MSG", ServerPlayed(), ServerPlayed()) -- the next real one
+	check(SF.GetStatus() == "UNVERIFIED" and SF.OpenGapTotal() >= 3500, "next real /played exposes the hidden time", SF.OpenGapTotal())
+
+	-- ...while ordinary /played checks never create gaps
+	Fresh()
+	for _ = 1, 5 do
+		Advance(600)
+		Fire("TIME_PLAYED_MSG", ServerPlayed(), ServerPlayed())
+	end
+	check(#SF.run.gaps == 0 and SF.GetStatus() == "CLEAN", "normal /played during play doesn't create gaps")
 end
 
 print(string.format("\n%d passed, %d failed, %d errors", pass, fail, #W.errors))

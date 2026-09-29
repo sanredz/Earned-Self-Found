@@ -42,6 +42,14 @@ First release.
   how much of your play time other players' addons recorded, and by how many
   different players. Disputes are shown beside it. It appears in the window,
   tooltips, the minimap button and reports.
+- Chat-command protection: the addon works on a private copy of its data
+  that `/run` can't reach, exposes no global handle, and checks every
+  `/played` response.
+- Unforgeable sightings: heartbeats carry a token derived from a per-run
+  secret key. Crash recoveries and disputes need a sighting that echoes a
+  real token.
+- `/sf preview` shows the disqualification alert and a sample dispute
+  without saving or sharing anything.
 - Griefing protection: other players can never disqualify you or make you
   Unverified. Witness claims are recorded by name and shown in Verify with how
   many witnesses back them. Messages from players outside your guild or group

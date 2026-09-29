@@ -255,10 +255,16 @@ function SF.GapWitnesses(g, violations)
 end
 
 -- A witness reports the latest /played it saw from us inside the gap that
--- starts at `from`. Returns true if the gap is (now) recovered.
-function SF.GapSighting(from, seen, status, violations, witness)
+-- starts at `from`, echoing that heartbeat's token. Only sightings of
+-- heartbeats we really sent (valid token) count; anything else - a friend
+-- or troll making one up - is ignored entirely. Returns true if the gap is
+-- (now) recovered.
+function SF.GapSighting(from, seen, status, violations, witness, token)
 	from, seen, violations = tonumber(from), tonumber(seen), tonumber(violations) or 0
 	if not (SF.run and from and seen and type(witness) == "string" and SF.STATUS_WORD and SF.STATUS_WORD[status]) then
+		return false
+	end
+	if token ~= SF.Token(seen, status, violations) then
 		return false
 	end
 	for _, g in ipairs(SF.run.gaps) do
@@ -357,9 +363,32 @@ end
 
 SF.integrity = { ok = true }
 
+-- A per-run secret that never leaves this computer. Heartbeats carry
+-- tokens derived from it, so witnesses can prove a sighting of us is real
+-- (see SF.Token) without anyone else being able to forge one.
+local function NewKey()
+	local seed = table.concat({
+		tostring(time()), tostring(GetTime()),
+		tostring(math.random(0, 2147483646)), tostring(math.random(0, 2147483646)),
+		tostring(debugprofilestop and debugprofilestop() or 0),
+		tostring(UnitGUID and UnitGUID("player") or ""), tostring({}),
+	}, "|")
+	return SF.Hash("k1" .. seed) .. SF.Hash("k2" .. seed)
+end
+
+-- Token binding one heartbeat's /played, status and violation count to our
+-- secret key. A witness echoing it back proves we really broadcast exactly
+-- that; without the key it can't be forged.
+function SF.Token(played, status, violations)
+	return SF.Hash(SF.cdb.key .. SEP .. string.format("%.0f", tonumber(played) or 0) .. SEP .. tostring(status) .. SEP .. string.format("%.0f", tonumber(violations) or 0)):sub(1, 8)
+end
+
 local function LoadRun()
 	local cdb = SF.cdb
 	cdb.log = cdb.log or {}
+	if type(cdb.key) ~= "string" or #cdb.key < 16 then
+		cdb.key = NewKey()
+	end
 
 	if type(cdb.run) ~= "table" then
 		cdb.run = NewRun()
@@ -396,7 +425,13 @@ SF.On("ADDON_LOADED", function(name)
 	SelfFoundDB = type(SelfFoundDB) == "table" and SelfFoundDB or {}
 	SelfFoundCharDB = type(SelfFoundCharDB) == "table" and SelfFoundCharDB or {}
 	SF.db = SelfFoundDB
-	SF.cdb = SelfFoundCharDB
+	-- Work on a PRIVATE copy of the run. The saved-variable global is
+	-- reachable from chat (/run); edits to it have no effect, because it's
+	-- replaced with our copy at logout. (If that ever failed, the untouched
+	-- original from login would be saved: consistent, just missing this
+	-- session, which then shows as untracked time.)
+	SF.cdb = SF.Copy(SelfFoundCharDB)
+	SelfFoundCharDB.key = nil
 	SF.db.settings = SF.db.settings or {}
 	ApplyDefaults(SF.db.settings, DEFAULT_SETTINGS)
 	SF.db.settings.broadcast = nil -- removed option; sharing is always on
@@ -419,4 +454,5 @@ SF.On("PLAYER_LOGOUT", function()
 	end
 	SF.Fire("BeforeSave")
 	SF.Commit()
+	SelfFoundCharDB = SF.cdb -- the only moment our private copy becomes the saved one
 end)

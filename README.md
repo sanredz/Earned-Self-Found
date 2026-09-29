@@ -113,9 +113,13 @@ run, e.g. **CLEAN · Well witnessed**:
   you or make you Unverified.
 - Messages only count on the channels they're really sent on, and only from
   players seen in your guild or group.
-- A witness who claims they saw you break a rule is recorded under their
-  name and shown in Verify, together with how many witnesses back it up. The
-  claim is never enforced automatically.
+- Every heartbeat carries a token made from a secret key that never leaves
+  your computer. A witness's sighting only counts if it echoes the exact token
+  of a heartbeat you really sent, so nobody can make one up, whether to fake
+  your crash recovery or to accuse you.
+- A witness who proves you broadcast a disqualification before a crash is
+  recorded under their name and shown in Verify. It's never enforced
+  automatically.
 
 ## Install
 
@@ -146,6 +150,8 @@ their code and saved data sit on the player's computer. Earned makes cheating
 
 - The event log is hash-chained and all saved data is sealed. Editing the file
   by hand is detected and disqualifies the run.
+- While you play, the addon works on a private copy of its data that chat
+  commands (`/run`) can't reach, and only writes it out when you log out.
 - Your status is sent to witnesses about a second after a violation. Those
   records live on *their* computers, so deleting or editing your own data
   doesn't erase what they saw.

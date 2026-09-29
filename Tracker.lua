@@ -486,6 +486,15 @@ SF.On("TIME_PLAYED_MSG", function(total)
 				SF.Fire("StatusChanged")
 			end
 		end
+	else
+		-- Every later /played must match what we've been counting. A jump
+		-- means play time we didn't see - e.g. an earlier, faked response
+		-- that hid a gap, exposed by the next real one.
+		local expected = (played.server or 0) + (GetTime() - sampleAt)
+		local drift = total - expected
+		if drift >= GAP_TOLERANCE then
+			SF.AddGap(drift, "play time didn't match the server's /played", expected, total)
+		end
 	end
 
 	played.server = total

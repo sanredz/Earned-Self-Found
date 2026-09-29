@@ -38,10 +38,11 @@ local function HeartbeatBody()
 	local run = SF.run
 	local _, _, code = SF.GetStatus()
 	local tier, pct, _, disputes = SF.WitnessRating(true)
+	local played = math.floor(SF.PlayedNow())
 	return table.concat({
 		code,
 		UnitLevel("player") or 0,
-		math.floor(SF.PlayedNow()),
+		played,
 		run.stats.deaths,
 		#run.violations,
 		SF.GapTotal(),
@@ -54,6 +55,7 @@ local function HeartbeatBody()
 		tier,
 		pct,
 		disputes,
+		SF.Token(played, code, #run.violations),
 	}, "|")
 end
 
@@ -81,6 +83,7 @@ local function ParseBody(parts, offset)
 		rt = tonumber(parts[offset + 13]),
 		wp = tonumber(parts[offset + 14]),
 		dp = tonumber(parts[offset + 15]),
+		tk = parts[offset + 16],
 	}
 end
 
@@ -229,7 +232,8 @@ local function AnswerRecall(sender, from, to)
 	end
 	local best
 	local function Consider(obs)
-		if type(obs) == "table" and obs.pl and obs.pl > from and obs.pl <= to + 5 and (not best or obs.pl > best.pl) then
+		-- Only heartbeats with a token can prove anything to the requester.
+		if type(obs) == "table" and obs.tk and obs.pl and obs.pl > from and obs.pl <= to + 5 and (not best or obs.pl > best.pl) then
 			best = obs
 		end
 	end
@@ -243,7 +247,7 @@ local function AnswerRecall(sender, from, to)
 	if best then
 		repliedAt[key] = time()
 		replyBudget = replyBudget + 1
-		Send(string.format("C1|%.0f|%.0f|%s|%d|%d|%.0f", from, best.pl, best.s, best.v or 0, best.d or 0, best.t or 0), "WHISPER", sender)
+		Send(string.format("C1|%.0f|%.0f|%s|%d|%d|%.0f|%s", from, best.pl, best.s, best.v or 0, best.d or 0, best.t or 0, best.tk), "WHISPER", sender)
 	end
 end
 
@@ -276,7 +280,7 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 		return
 	elseif kind == "C1" then
 		if channel == "WHISPER" and known then
-			SF.GapSighting(parts[2], parts[3], parts[4], parts[5], sender)
+			SF.GapSighting(parts[2], parts[3], parts[4], parts[5], sender, parts[8])
 		end
 		return
 	elseif kind == "H1" then
