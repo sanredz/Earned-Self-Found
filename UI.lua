@@ -53,11 +53,13 @@ local LOG_ICON = {
 	quest = ICON.quests,
 	destroy = ICON.destroyed,
 	info = ICON.fees,
+	recover = ICON.witnesses,
 }
 
 local LOG_COLOR = {
 	violation = SF.COLOR.DISQUALIFIED,
 	gap = SF.COLOR.UNVERIFIED,
+	recover = SF.COLOR.CLEAN,
 	death = { 0.85, 0.55, 0.55 },
 	level = SF.COLOR.GOLD,
 	start = SF.COLOR.CLEAN,
@@ -370,7 +372,18 @@ local function RefreshOverview(page)
 	local stats, items = run.stats, run.items
 	t.level.value:SetText(UnitLevel("player") or 0)
 	t.played.value:SetText(SF.Duration(SF.PlayedNow()))
-	t.played.tip = { "Total play time on this character.", string.format("Untracked: %s", SF.Duration(SF.GapTotal())) }
+	t.played.tip = { "Total play time on this character.", string.format("Untracked: %s", SF.Duration(SF.OpenGapTotal())) }
+	for _, g in ipairs(run.gaps) do
+		local support, dispute = SF.GapWitnesses(g)
+		if g.cov then
+			table.insert(t.played.tip, { string.format("Crash %s: %s recovered, confirmed by %d witness%s", SF.Date(g.t), SF.Duration(g.s),
+				#support, #support == 1 and "" or "es"), 0.3, 0.92, 0.4 })
+		end
+		if #dispute > 0 then
+			table.insert(t.played.tip, { string.format("%d witness%s claim%s a violation during untracked time (%s)", #dispute,
+				#dispute == 1 and "" or "es", #dispute == 1 and "s" or "", SF.Date(g.t)), 1, 0.78, 0.1 })
+		end
+	end
 	t.deaths.value:SetText(Number(stats.deaths))
 	t.kills.value:SetText(Number(stats.kills))
 	t.kills.tip = { "Enemies killed that gave you experience." }
@@ -621,6 +634,7 @@ local function InitWitnessedRow(row, data)
 				string.format("Level %d, %s played", l.lvl or 0, SF.Duration(l.pl)),
 				string.format("Deaths %d, violations %d, untracked %s", l.d or 0, l.v or 0, SF.Duration(l.g)),
 				{ string.format("Seen %d times; first %s, last %s", d.rec.n or 0, SF.Date(d.rec.first), SF.Ago(d.rec.last)), 0.6, 0.6, 0.6 },
+				{ "Addon version: " .. (l.ver and l.ver ~= "" and l.ver or "unknown (older than 1.0.0)"), 0.6, 0.6, 0.6 },
 			})
 		end)
 		row:SetScript("OnLeave", HideTooltip)

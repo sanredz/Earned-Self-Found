@@ -166,19 +166,132 @@ function SF.Violation(code, text)
 	SF.Fire("StatusChanged")
 end
 
-function SF.AddGap(seconds, detail)
+-- Untracked play time. `from`/`to` are the /played values where the gap
+-- starts (last save) and ends (this login); they let a witness who saw the
+-- addon running until just before `to` recover it (a crash, not cheating).
+function SF.AddGap(seconds, detail, from, to)
 	seconds = math.floor(seconds)
-	table.insert(SF.run.gaps, { t = time(), s = seconds })
+	table.insert(SF.run.gaps, { t = time(), s = seconds, from = from and math.floor(from), to = to and math.floor(to) })
 	SF.Log("gap", string.format("%s of play time wasn't tracked%s", SF.Duration(seconds), detail and (" (" .. detail .. ")") or ""))
 	SF.Fire("StatusChanged")
 end
 
+-- All untracked time ever, recovered or not. Only ever grows, which is what
+-- witnesses record and Verify compares.
 function SF.GapTotal()
 	local total = 0
 	for _, g in ipairs(SF.run.gaps) do
 		total = total + (g.s or 0)
 	end
 	return total
+end
+
+-- Untracked time that no witness has recovered: this is what makes a run
+-- Unverified.
+function SF.OpenGapTotal()
+	local total = 0
+	for _, g in ipairs(SF.run.gaps) do
+		if not g.cov then
+			total = total + (g.s or 0)
+		end
+	end
+	return total
+end
+
+function SF.RecoveredGaps()
+	local count, total = 0, 0
+	for _, g in ipairs(SF.run.gaps) do
+		if g.cov then
+			count, total = count + 1, total + (g.s or 0)
+		end
+	end
+	return count, total
+end
+
+local RECOVERY_WINDOW = 7 * 86400 -- keep asking witnesses for this long
+
+-- Gaps that witnesses could still recover (newest first).
+function SF.PendingGaps()
+	local list = {}
+	for i = #SF.run.gaps, 1, -1 do
+		local g = SF.run.gaps[i]
+		if not g.cov and g.from and g.to and time() - (g.t or 0) <= RECOVERY_WINDOW then
+			list[#list + 1] = g
+		end
+	end
+	return list
+end
+
+-- The last heartbeat a witness saw must be after the last save (the addon
+-- was running in the lost session) and at most this many seconds of
+-- /played before the gap's end (it kept running until the crash).
+SF.COVER_SLACK = 90
+
+SF.MIN_COVER = 1  -- witnesses needed to recover a gap; more add credibility
+local SEEN_MAX = 10  -- sightings kept per gap
+
+-- Principle: other players can never disqualify you or make you Unverified.
+-- What witnesses report is stored per witness and counted (credibility), but
+-- only your own addon's observations change your status. Witnesses can only
+-- help: enough consistent sightings recover a crash.
+
+-- Witnesses whose sighting recovers the gap, and witnesses claiming a
+-- violation during it (sorted by name). `violations` = how many the run
+-- has (defaults to ours; pass a report's count when checking someone else).
+function SF.GapWitnesses(g, violations)
+	violations = violations or #SF.run.violations
+	local support, dispute = {}, {}
+	for name, o in pairs(g.seen or {}) do
+		if o.s == "D" or (tonumber(o.v) or 0) > violations then
+			dispute[#dispute + 1] = name
+		elseif g.to and tonumber(o.pl) and g.to - o.pl <= SF.COVER_SLACK then
+			support[#support + 1] = name
+		end
+	end
+	table.sort(support)
+	table.sort(dispute)
+	return support, dispute
+end
+
+-- A witness reports the latest /played it saw from us inside the gap that
+-- starts at `from`. Returns true if the gap is (now) recovered.
+function SF.GapSighting(from, seen, status, violations, witness)
+	from, seen, violations = tonumber(from), tonumber(seen), tonumber(violations) or 0
+	if not (SF.run and from and seen and type(witness) == "string" and SF.STATUS_WORD and SF.STATUS_WORD[status]) then
+		return false
+	end
+	for _, g in ipairs(SF.run.gaps) do
+		if g.from == from and g.to then
+			if seen <= g.from or seen > g.to + 5 then
+				return false
+			end
+			g.seen = g.seen or {}
+			local prev = g.seen[witness]
+			if prev and prev.pl >= seen and prev.s == status then
+				return g.cov ~= nil
+			end
+			if not prev then
+				local count = 0
+				for _ in pairs(g.seen) do
+					count = count + 1
+				end
+				if count >= SEEN_MAX then
+					return g.cov ~= nil
+				end
+			end
+			g.seen[witness] = { pl = seen, s = status, v = violations, t = time() }
+
+			local support = SF.GapWitnesses(g)
+			if not g.cov and #support >= SF.MIN_COVER then
+				g.cov, g.by, g.ct = seen, support[1], time()
+				SF.Log("recover", string.format("Recovered %s of untracked play time after a crash, confirmed by %s", SF.Duration(g.s), SF.ShortName(witness)))
+				SF.Fire("StatusChanged")
+			end
+			SF.Changed()
+			return g.cov ~= nil
+		end
+	end
+	return false
 end
 
 function SF.Add(group, key, amount)
@@ -218,12 +331,21 @@ function SF.GetStatus()
 	if run.lateStart then
 		reasons[#reasons + 1] = string.format("Tracking started at level %d with %s already played", run.lateStart.level or 0, SF.Duration(run.lateStart.played))
 	end
-	local gapTotal = SF.GapTotal()
-	if gapTotal > 0 then
-		reasons[#reasons + 1] = string.format("%s of play time wasn't tracked", SF.Duration(gapTotal))
+	local open = SF.OpenGapTotal()
+	if open > 0 then
+		local text = string.format("%s of play time wasn't tracked", SF.Duration(open))
+		if #SF.PendingGaps() > 0 and not run.lateStart then
+			text = text .. ". If the game crashed, guild or group witnesses can recover it"
+		end
+		reasons[#reasons + 1] = text
 	end
 	if #reasons > 0 then
-		return "UNVERIFIED", table.concat(reasons, ". "), "U"
+		return "UNVERIFIED", table.concat(reasons, ". ") .. ".", "U"
+	end
+	local recovered = SF.RecoveredGaps()
+	if recovered > 0 then
+		return "CLEAN", string.format("No trades, auctions, or player mail. All play time accounted for (%d crash%s recovered by witnesses).",
+			recovered, recovered == 1 and "" or "es"), "C"
 	end
 	return "CLEAN", "No trades, auctions, or player mail, and all play time accounted for.", "C"
 end

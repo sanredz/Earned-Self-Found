@@ -33,7 +33,15 @@ First release.
 - Hash-chained event log and a seal over all saved data; editing the saved
   file outside the game disqualifies the run.
 - Witnesses: players running the addon in the same guild or group exchange
-  status heartbeats and keep records of each other. Sharing is always on.
+  status heartbeats every minute and keep records of each other. Sharing is
+  always on.
+- Crash recovery: play time lost to a game crash is recovered when witnesses
+  heard from the addon right up until the crash. Each recovery lists the
+  witnesses who confirmed it.
+- Griefing protection: other players can never disqualify you or make you
+  Unverified. Witness claims are recorded by name and shown in Verify with how
+  many witnesses back them. Messages from players outside your guild or group
+  are ignored.
 - Shareable reports with a checksum, and a Verify tool that cross-checks a
   report against your own witness records.
 

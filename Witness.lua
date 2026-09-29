@@ -8,8 +8,12 @@
 local ADDON, SF = ...
 
 local HISTORY_MAX = 40
-local BROADCAST_INTERVAL = 300
+local BROADCAST_INTERVAL = 60 -- often enough that a witness saw us right before a crash
 local ACK_INTERVAL = 600
+local RECALL_INTERVAL = 120   -- how often to ask witnesses to recover a gap
+local REPLY_INTERVAL = 300    -- per requester and gap
+local SESSION_SILENCE = 180   -- fallback session boundary for senders without a session id
+local ENDS_MAX = 10           -- last heartbeat of each of a player's recent sessions
 local STATUS_WORD = { C = "CLEAN", U = "UNVERIFIED", D = "DISQUALIFIED" }
 SF.STATUS_WORD = STATUS_WORD
 
@@ -26,7 +30,8 @@ local function Split(text, sep)
 end
 
 -- Status, level, played, deaths, violations, untracked seconds, late start,
--- log head, class, quests.
+-- log head, class, quests, session id, addon version. Fields may only ever be
+-- appended: older versions ignore extra ones.
 local function HeartbeatBody()
 	local run = SF.run
 	local _, _, code = SF.GetStatus()
@@ -41,6 +46,8 @@ local function HeartbeatBody()
 		SF.LogHead():sub(1, 8),
 		run.class or "",
 		run.stats.quests,
+		SF.sessionId or 0,
+		SF.VERSION,
 	}, "|")
 end
 
@@ -63,6 +70,8 @@ local function ParseBody(parts, offset)
 		head = parts[offset + 8] or "",
 		class = parts[offset + 9] or "",
 		q = n(10),
+		sid = tonumber(parts[offset + 11]),
+		ver = parts[offset + 12],
 	}
 end
 
@@ -82,18 +91,8 @@ local function Send(message, channel, target)
 	end
 end
 
-local lastBroadcast = -math.huge
-
-function SF.Broadcast(force)
-	if not SF.run then
-		return
-	end
-	local now = GetTime()
-	if not force and now - lastBroadcast < 60 then
-		return
-	end
-	lastBroadcast = now
-	local message = "H1|" .. HeartbeatBody()
+-- Guild, plus raid or party if grouped.
+local function SendToWitnesses(message)
 	if IsInGuild and IsInGuild() then
 		Send(message, "GUILD")
 	end
@@ -105,13 +104,46 @@ function SF.Broadcast(force)
 	end
 end
 
+local lastBroadcast, lastRecall = -math.huge, -math.huge
+
+-- Asks witnesses what they last saw of us inside untracked gaps
+-- ("R1|from|to"); a witness who saw the addon running until just before
+-- the gap's end answers with "C1", recovering it.
+local function SendRecalls()
+	local now = GetTime()
+	if now - lastRecall < RECALL_INTERVAL then
+		return
+	end
+	local pending = SF.PendingGaps()
+	if #pending == 0 then
+		return
+	end
+	lastRecall = now
+	for i = 1, math.min(3, #pending) do
+		SendToWitnesses(string.format("R1|%.0f|%.0f", pending[i].from, pending[i].to))
+	end
+end
+
+function SF.Broadcast(force)
+	if not SF.run then
+		return
+	end
+	local now = GetTime()
+	if not force and now - lastBroadcast < 60 then
+		return
+	end
+	lastBroadcast = now
+	SendToWitnesses("H1|" .. HeartbeatBody())
+	SendRecalls()
+end
+
 -- ---------------------------------------------------------------------------
 -- Receiving
 -- ---------------------------------------------------------------------------
 
 local ackedAt = {}
 
-local function Record(sender, obs)
+local function Record(sender, obs, viaShared)
 	local witness = SF.db.witness
 	local rec = witness[sender]
 	if type(rec) ~= "table" then
@@ -120,13 +152,34 @@ local function Record(sender, obs)
 	end
 	rec.n = (rec.n or 0) + 1
 	rec.last = time()
+	if viaShared then
+		rec.shared = time() -- seen in our guild or group: trusted to whisper us
+	end
 	rec.class = obs.class ~= "" and obs.class or rec.class
 	obs.t = time()
 	obs.class = nil
 
+	-- Remember the last heartbeat of each session: if their game crashed,
+	-- that's the proof their addon was running until (almost) the end.
+	local prev = rec.latest
+	if prev then
+		local newSession
+		if obs.sid and prev.sid then
+			newSession = obs.sid ~= prev.sid
+		else
+			newSession = obs.t - (prev.t or 0) > SESSION_SILENCE
+		end
+		if newSession then
+			rec.ends = rec.ends or {}
+			table.insert(rec.ends, prev)
+			while #rec.ends > ENDS_MAX do
+				table.remove(rec.ends, 1)
+			end
+		end
+	end
+
 	-- Keep a history point whenever something meaningful changed, so a
 	-- report can be checked against how the run looked at the time.
-	local prev = rec.latest
 	local changed = not prev or prev.s ~= obs.s or prev.lvl ~= obs.lvl or prev.d ~= obs.d
 		or prev.v ~= obs.v or prev.g ~= obs.g or (obs.pl - (prev.pl or 0)) >= 1800
 	if changed then
@@ -139,6 +192,47 @@ local function Record(sender, obs)
 	SF.Fire("WitnessChanged")
 end
 
+-- Someone asks what we last saw of them inside their gap (from, to]. Answer
+-- with the latest heartbeat we have in that range, if any.
+local repliedAt = {}
+local replyBudget, budgetAt = 0, 0
+local REPLIES_PER_MINUTE = 20 -- so nobody can make us spam whispers
+
+local function AnswerRecall(sender, from, to)
+	local rec = SF.db.witness[sender]
+	if not (from and to and type(rec) == "table") then
+		return
+	end
+	local key = sender .. ":" .. from
+	if repliedAt[key] and time() - repliedAt[key] < REPLY_INTERVAL then
+		return
+	end
+	if time() - budgetAt >= 60 then
+		replyBudget, budgetAt = 0, time()
+	end
+	if replyBudget >= REPLIES_PER_MINUTE then
+		return
+	end
+	local best
+	local function Consider(obs)
+		if type(obs) == "table" and obs.pl and obs.pl > from and obs.pl <= to + 5 and (not best or obs.pl > best.pl) then
+			best = obs
+		end
+	end
+	Consider(rec.latest)
+	for _, obs in ipairs(rec.ends or {}) do
+		Consider(obs)
+	end
+	for _, obs in ipairs(rec.history or {}) do
+		Consider(obs)
+	end
+	if best then
+		repliedAt[key] = time()
+		replyBudget = replyBudget + 1
+		Send(string.format("C1|%.0f|%.0f|%s|%d|%d|%.0f", from, best.pl, best.s, best.v or 0, best.d or 0, best.t or 0), "WHISPER", sender)
+	end
+end
+
 SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 	prefix, text, sender = SF.Safe(prefix), SF.Safe(text), SF.Safe(sender)
 	if prefix ~= SF.PREFIX or type(text) ~= "string" or type(sender) ~= "string" or not SF.run then
@@ -148,15 +242,46 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 	if not sender or sender == SF.playerKey then
 		return
 	end
+	channel = SF.Safe(channel)
+	local shared = channel == "GUILD" or channel == "PARTY" or channel == "RAID"
 	local parts = Split(text, "|")
 	local kind = parts[1]
-	if kind ~= "H1" and kind ~= "A1" then
+
+	-- Anti-griefing: the server guarantees who sent a message, and everyone
+	-- can only speak about themselves - except C1, a witness's sighting of
+	-- us. Each kind is only accepted on the channel it's really sent on, and
+	-- whispers only from players we know from our guild/group (they've sent
+	-- a heartbeat there). A stranger whispering fake messages is ignored.
+	local rec = SF.db.witness[sender]
+	local known = type(rec) == "table" and rec.shared ~= nil
+
+	if kind == "R1" then
+		if shared then
+			AnswerRecall(sender, tonumber(parts[2]), tonumber(parts[3]))
+		end
+		return
+	elseif kind == "C1" then
+		if channel == "WHISPER" and known then
+			SF.GapSighting(parts[2], parts[3], parts[4], parts[5], sender)
+		end
+		return
+	elseif kind == "H1" then
+		if not shared then
+			return
+		end
+	elseif kind == "A1" then
+		if channel ~= "WHISPER" or not known then
+			return
+		end
+	else
 		return
 	end
+
 	local obs = ParseBody(parts, 1)
-	if obs then
-		Record(sender, obs)
+	if not obs then
+		return
 	end
+	Record(sender, obs, kind == "H1")
 
 	if kind == "A1" then
 		-- They recorded our heartbeat: they're now a witness of this run.
@@ -174,6 +299,7 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 end)
 
 SF.Listen("Ready", function()
+	SF.sessionId = time()
 	if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
 		pcall(C_ChatInfo.RegisterAddonMessagePrefix, SF.PREFIX)
 	end
@@ -195,10 +321,9 @@ SF.Listen("Milestone", function()
 	SF.Broadcast(true)
 end)
 
+-- Immediately, so witnesses know even if the game is closed right after.
 SF.Listen("Violation", function()
-	SF.After(1, function()
-		SF.Broadcast(true)
-	end)
+	SF.Broadcast(true)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -305,6 +430,7 @@ function SF.BuildReport()
 		violations = Copy(run.violations),
 		gaps = Copy(run.gaps),
 		gapTotal = SF.GapTotal(),
+		gapOpen = SF.OpenGapTotal(),
 		logCount = SF.LogCount(),
 		logHead = SF.LogHead(),
 		integrity = SF.integrity.ok and 1 or 0,
@@ -338,7 +464,19 @@ function SF.ReportSummary(report)
 		end
 	end
 	if (report.gapTotal or 0) > 0 then
-		lines[#lines + 1] = string.format("Untracked play time: %s", SF.Duration(report.gapTotal))
+		local open = report.gapOpen or report.gapTotal
+		lines[#lines + 1] = string.format("Untracked play time: %s", SF.Duration(open))
+	end
+	for _, g in ipairs(report.gaps or {}) do
+		local support, dispute = SF.GapWitnesses(g, #report.violations)
+		if g.cov then
+			lines[#lines + 1] = string.format("  Crash on %s: %s recovered, confirmed by %d witness%s (%s)", SF.Date(g.t), SF.Duration(g.s),
+				#support, #support == 1 and "" or "es", table.concat(support, ", "))
+		end
+		if #dispute > 0 then
+			lines[#lines + 1] = string.format("  %d witness%s claim%s a violation during untracked time on %s (%s)", #dispute,
+				#dispute == 1 and "" or "es", #dispute == 1 and "s" or "", SF.Date(g.t), table.concat(dispute, ", "))
+		end
 	end
 	local names = {}
 	for i, w in ipairs(report.witnesses or {}) do
@@ -424,6 +562,41 @@ function SF.VerifyReport(report)
 	if report.integrity == 0 then
 		contradictions[#contradictions + 1] = "The addon itself detected that their saved data was edited outside the game."
 	end
+
+	-- Crash recoveries and witness claims: credibility grows with the number
+	-- of witnesses. Claims are shown, never treated as proof on their own.
+	for _, g in ipairs(report.gaps or {}) do
+		local support, dispute = SF.GapWitnesses(g, #report.violations)
+		if g.cov then
+			notes[#notes + 1] = string.format("Crash on %s (%s) recovered, confirmed by %d witness%s: %s.", SF.Date(g.t), SF.Duration(g.s),
+				#support, #support == 1 and "" or "es", table.concat(support, ", "))
+		end
+		if #dispute > 0 then
+			notes[#notes + 1] = string.format("%d witness%s claim%s a violation during untracked time on %s: %s. Ask them to verify too.",
+				#dispute, #dispute == 1 and "" or "es", #dispute == 1 and "s" or "", SF.Date(g.t), table.concat(dispute, ", "))
+		end
+		local mine = g.seen and g.seen[SF.playerKey]
+		if mine then
+			local confirmed = false
+			local function Match(obs)
+				if type(obs) == "table" and obs.pl == mine.pl and obs.s == mine.s then
+					confirmed = true
+				end
+			end
+			if rec then
+				Match(rec.latest)
+				for _, obs in ipairs(rec.ends or {}) do
+					Match(obs)
+				end
+				for _, obs in ipairs(rec.history or {}) do
+					Match(obs)
+				end
+			end
+			notes[#notes + 1] = confirmed and "Your own records confirm the crash sighting the report lists from you."
+				or "The report lists a crash sighting from you that your records can't confirm (it may be too old)."
+		end
+	end
+
 	if not rec or not rec.history or #rec.history == 0 then
 		notes[#notes + 1] = "You have no witness records of this character, so only the checksum could be checked. Ask one of their witnesses to verify it."
 		return contradictions, notes

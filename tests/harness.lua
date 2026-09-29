@@ -588,6 +588,140 @@ check(SF.GetStatus() == "UNVERIFIED", "untracked hour => UNVERIFIED", select(2, 
 check(#SF.run.gaps == 1 and SF.run.gaps[1].s >= 3500, "gap recorded", SF.run.gaps[1] and SF.run.gaps[1].s)
 check(SF.integrity.ok, "a gap is not tampering")
 
+-- Crash recovery: a witness who saw the addon running until just before the
+-- crash recovers the gap.
+do
+	local gap = SF.run.gaps[1]
+	check(gap.from and gap.to and math.abs((gap.to - gap.from) - gap.s) <= 1, "gap records its /played range", tostring(gap.from) .. ".." .. tostring(gap.to))
+	check(select(2, SF.GetStatus()):find("witnesses can recover", 1, true) ~= nil, "Unverified reason mentions recovery")
+
+	W.sent = {}
+	Advance(20) -- Ready + 15s broadcast
+	local recall = false
+	for _, s in ipairs(W.sent) do
+		if s[3] == "GUILD" and s[2] == string.format("R1|%.0f|%.0f", gap.from, gap.to) then recall = true end
+	end
+	check(recall, "recall request sent to guild")
+
+	local function Cover(seen, status, violations, who)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|%s|%d|0|0", gap.from, seen, status or "C", violations or 0), "WHISPER", who or "Bob")
+	end
+	Cover(gap.to - 200)
+	check(SF.GetStatus() == "UNVERIFIED" and not gap.cov, "last sighting too long before the crash: not recovered")
+	Cover(gap.from)
+	check(not gap.cov, "sighting from before the last save: not recovered")
+	Cover(gap.to + 60)
+	check(not gap.cov, "sighting after the gap (current session): not recovered")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "C1|12345|12300|C|0|0|0", "WHISPER", "Bob")
+	check(not gap.cov, "unknown gap ignored")
+	local logBefore = SF.LogCount()
+
+	-- Griefing: strangers (never seen in our guild/group) are ignored entirely
+	Cover(gap.to - 30, "C", 0, "Stranger")
+	check(not gap.cov and not (gap.seen and gap.seen["Stranger-TestRealm"]), "stranger's sighting ignored")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "A1|C|60|999999|0|0|0|0|abcd1234|ROGUE|0", "WHISPER", "Stranger")
+	check(not SF.run.witnessedBy["Stranger-TestRealm"], "stranger can't pose as our witness")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|60|999999|0|0|0|0|abcd1234|ROGUE|0", "WHISPER", "Stranger")
+	check(not SelfFoundDB.witness["Stranger-TestRealm"], "heartbeats only accepted from guild/group channels")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|C|0|0|0", gap.from, gap.to - 30), "GUILD", "Bob")
+	check(not gap.cov, "sightings only accepted as whispers")
+
+	-- A known witness claiming a DQ: recorded with their name, never enforced
+	Cover(gap.to - 30, "D", 1, "Carl")
+	check(not gap.cov and SF.GetStatus() == "UNVERIFIED" and #SF.run.violations == 0, "witness claiming a DQ can't recover it or disqualify")
+	check(gap.seen["Carl-TestRealm"] and gap.seen["Carl-TestRealm"].s == "D", "the claim is recorded under the witness's name")
+	check(SF.LogCount() == logBefore, "witness claims never go into your log")
+	local _, dispute = SF.GapWitnesses(gap)
+	check(#dispute == 1 and dispute[1] == "Carl-TestRealm", "claim counted as a dispute")
+
+	Cover(gap.to - 30)
+	check(gap.cov == gap.to - 30 and gap.by == "Bob-TestRealm", "valid sighting recovers the gap")
+	check(SF.LogCount() == logBefore + 1, "recovery logged once")
+
+	-- More witnesses add credibility
+	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|20|7000|0|0|0|0|abcd1234|DRUID|3|1|1.0.0", "GUILD", "Frank")
+	Cover(gap.to - 25, "C", 0, "Frank")
+	local support = SF.GapWitnesses(gap)
+	check(#support == 2, "second witness adds credibility", #support)
+	check(SF.LogCount() == logBefore + 1, "extra confirmations don't add log entries")
+	local notes = select(2, SF.VerifyReport(SF.BuildReport()))
+	local noted = table.concat(notes, " | ")
+	check(noted:find("confirmed by 2 witnesses", 1, true) and noted:find("1 witness claims a violation", 1, true), "Verify shows confirmations and claims", noted)
+	check(SF.GetStatus() == "CLEAN", "recovered crash => CLEAN", select(2, SF.GetStatus()))
+	check(select(2, SF.GetStatus()):find("1 crash recovered", 1, true) ~= nil, "CLEAN reason mentions the recovered crash")
+	check(SelfFoundCharDB.log[#SelfFoundCharDB.log].k == "recover", "recovery logged")
+	check(SF.GapTotal() == gap.s and SF.OpenGapTotal() == 0, "raw gap total kept, open total cleared")
+	local r = SF.BuildReport()
+	check(r.gapTotal == gap.s and r.gapOpen == 0, "report carries raw and open gap totals")
+	local summary = SF.ReportSummary(r)
+	check(summary:find("recovered, confirmed by 2 witnesses", 1, true) ~= nil and summary:find("1 witness claims a violation", 1, true) ~= nil, "report summary shows recovery and claims", summary)
+
+	W.sent = {}
+	Advance(130)
+	local again = false
+	for _, s in ipairs(W.sent) do if s[2]:match("^R1|") then again = true end end
+	check(not again, "no more recall requests once recovered")
+
+	Advance(30)
+	local recovered = Logout()
+	Boot(recovered, { played = ServerPlayed() })
+	check(SF.integrity.ok and SF.GetStatus() == "CLEAN", "recovery survives a reload")
+end
+
+-- Heartbeats every 60s
+W.sent = {}
+Advance(61)
+local beats = 0
+for _, s in ipairs(W.sent) do if s[2]:match("^H1|") then beats = beats + 1 end end
+check(beats >= 1, "heartbeat at least every 60s", beats)
+
+-- Witness side: answering someone else's recall
+do
+	local function Beat(who, pl, sid)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|C|10|%d|0|0|0|0|abcd1234|MAGE|5%s", pl, sid and ("|" .. sid .. "|1.0.0") or ""), "GUILD", who)
+	end
+	Beat("Dana", 5000, 100)
+	Advance(60); Beat("Dana", 5060, 100)
+	Advance(60); Beat("Dana", 5120, 200) -- crashed and came back quickly: new session id
+	local rec = SelfFoundDB.witness["Dana-TestRealm"]
+	check(rec.ends and rec.ends[1] and rec.ends[1].pl == 5060, "session end remembered via session id")
+	check(rec.latest.ver == "1.0.0", "addon version recorded")
+
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|4000|5090", "GUILD", "Dana")
+	check(#W.sent == 1 and W.sent[1][3] == "WHISPER" and W.sent[1][4] == "Dana-TestRealm" and W.sent[1][2]:match("^C1|4000|5060|C|"), "recall answered with last sighting in range", W.sent[1] and W.sent[1][2])
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|4000|5090", "GUILD", "Dana")
+	check(#W.sent == 0, "repeat recall throttled")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|9000|9500", "GUILD", "Dana")
+	check(#W.sent == 0, "no answer without a sighting in range")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|1|2", "GUILD", "Stranger")
+	check(#W.sent == 0, "no answer for players never witnessed")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|3000|5090", "WHISPER", "Dana")
+	check(#W.sent == 0, "recall requests only accepted from guild/group channels")
+
+	-- Verifying a report that names us as a crash witness
+	local danaReport = { char = "Dana-TestRealm", status = "CLEAN", level = 10, played = 5200, stats = { deaths = 0 }, violations = {}, gapTotal = 90, integrity = 1, witnesses = {},
+		gaps = { { t = time(), s = 90, from = 4000, to = 5090, cov = 5060, seen = { [SF.playerKey] = { pl = 5060, s = "C", v = 0 } } } } }
+	local vnotes = table.concat(select(2, SF.VerifyReport(danaReport)), " | ")
+	check(vnotes:find("Your own records confirm", 1, true) ~= nil, "Verify confirms our own listed sighting", vnotes)
+	danaReport.gaps[1].seen[SF.playerKey].pl = 5080
+	vnotes = table.concat(select(2, SF.VerifyReport(danaReport)), " | ")
+	check(vnotes:find("can't confirm", 1, true) ~= nil, "Verify flags a sighting attributed to us that we never made", vnotes)
+
+	-- Reply budget: nobody can make us spam whispers
+	for i = 1, 30 do
+		Fire("CHAT_MSG_ADDON", "SelfFound", "R1|" .. (4000 + i) .. "|5090", "GUILD", "Dana")
+	end
+	check(#W.sent <= 20, "recall answers capped per minute", #W.sent)
+
+	-- Older senders without a session id: long silence marks a new session
+	Beat("Erin", 100); Advance(10); Beat("Erin", 110); Advance(10); Beat("Erin", 120)
+	check(not SelfFoundDB.witness["Erin-TestRealm"].ends, "no session break within a session")
+	Advance(400); Beat("Erin", 130)
+	check(SelfFoundDB.witness["Erin-TestRealm"].ends[1].pl == 120, "session end remembered via silence")
+end
+
 -- ---------------------------------------------------------------------------
 -- 6. Tampering
 -- ---------------------------------------------------------------------------
@@ -658,7 +792,11 @@ check(SF.GetStatus() == "CLEAN", "cancelled trade doesn't disqualify")
 -- Completed trade
 Fire("TRADE_SHOW")
 Fire("TRADE_ACCEPT_UPDATE", 1, 1)
+W.sent = {}
 Fire("UI_INFO_MESSAGE", 0, "Trade complete.")
+local toldWitnesses = false
+for _, s in ipairs(W.sent) do if s[2]:match("^H1|D|") then toldWitnesses = true end end
+check(toldWitnesses, "violation broadcast to witnesses immediately (no delay)")
 Fire("TRADE_CLOSED")
 Advance(1)
 check(SF.GetStatus() == "DISQUALIFIED" and SF.HasViolation("TRADE") and SF.run.stats.trades == 1, "completed trade disqualifies")

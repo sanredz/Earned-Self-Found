@@ -65,7 +65,38 @@ Breaking one disqualifies the run on the spot:
   crashed). It's checked against the server's `/played`.
 - Installing the addon on a character that already had play time.
 
-Grouping is allowed.
+Grouping is allowed, and encouraged (see below).
+
+### Crashes: recovered by witnesses
+
+The game only saves addon data when you log out or `/reload`, so a hard crash
+loses the play time since then. On its own, that makes a run Unverified.
+
+If guild or group members running Earned were online, it's recovered:
+- Your addon tells them where you are every minute.
+- After a crash, it asks them when they last heard from you.
+- If a witness heard from you right up until the crash (within about 90
+  seconds of play time), it was a crash and not play without the addon. The
+  run stays **CLEAN**.
+
+Each recovery lists the witnesses who confirmed it, and more witnesses means
+more credibility.
+
+**Join a guild made for Earned and self-found players.** More witnesses
+online means crashes get recovered, and your run is vouched for by more
+people.
+
+### Other players can't grief you
+
+- Your status is only ever changed by **your own addon seeing your own
+  actions**.
+- Other players' addons can help recover a crash, but can never disqualify
+  you or make you Unverified.
+- Messages only count on the channels they're really sent on, and only from
+  players seen in your guild or group.
+- A witness who claims they saw you break a rule is recorded under their
+  name and shown in Verify, together with how many witnesses back it up. The
+  claim is never enforced automatically.
 
 ## Install
 
@@ -101,8 +132,9 @@ their code and saved data sit on the player's computer. Earned makes cheating
 - Play time is compared against the server's `/played`, so time played with
   the addon disabled shows up.
 
-A player who modifies the addon itself can still lie. The more witnesses a run
-has, the harder that is to hide.
+A player who modifies the addon itself can still lie, and a friend with a
+modified addon could vouch for a fake crash. The more witnesses a run has, the
+harder that is to hide, which is why every recovery shows who confirmed it.
 
 ## Development
 

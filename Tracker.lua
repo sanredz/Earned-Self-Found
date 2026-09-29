@@ -471,9 +471,11 @@ SF.On("TIME_PLAYED_MSG", function(total)
 		played.sessions = (played.sessions or 0) + 1
 		if played.server then
 			local loadTime = GetTime() - (SF.loadedAt or GetTime())
-			local gap = total - (played.server + (played.tracked or 0)) - loadTime
+			local from = played.server + (played.tracked or 0)
+			local to = total - loadTime
+			local gap = to - from
 			if gap >= GAP_TOLERANCE then
-				SF.AddGap(gap, "the addon wasn't running")
+				SF.AddGap(gap, "the addon didn't see it: a crash, or played without the addon", from, to)
 			end
 		else
 			run.startPlayed = total
