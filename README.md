@@ -86,6 +86,25 @@ more credibility.
 online means crashes get recovered, and your run is vouched for by more
 people.
 
+### Witness rating
+
+Next to your status you'll see how well other players can vouch for your
+run, e.g. **CLEAN · Well witnessed**:
+
+| Rating | Share of your play time witnessed | Different witnesses |
+|---|---|---|
+| Unwitnessed | less than 10% | |
+| Lightly witnessed | 10%+ | 1+ |
+| Well witnessed | 40%+ | 3+ |
+| Heavily witnessed | 75%+ | 5+ |
+
+- Play time counts as witnessed when another player's addon confirms it
+  recorded you.
+- If witnesses ever claimed they saw you break a rule, it shows next to the
+  rating as "(1 disputed)". It's never subtracted or enforced.
+- The rating appears in the window, on the minimap button, in player tooltips
+  and in shared reports.
+
 ### Other players can't grief you
 
 - Your status is only ever changed by **your own addon seeing your own

@@ -60,6 +60,7 @@ local function EnsureCounters(run)
 	run.gaps = run.gaps or {}
 	run.played = run.played or { tracked = 0, sessions = 0 }
 	run.witnessedBy = run.witnessedBy or {}
+	run.coverage = run.coverage or { last = -1, n = 0 }
 	run.logBase = run.logBase or { h = "genesis", n = 0 }
 end
 

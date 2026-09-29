@@ -38,6 +38,10 @@ First release.
 - Crash recovery: play time lost to a game crash is recovered when witnesses
   heard from the addon right up until the crash. Each recovery lists the
   witnesses who confirmed it.
+- Witness rating (Unwitnessed / Lightly / Well / Heavily witnessed) based on
+  how much of your play time other players' addons recorded, and by how many
+  different players. Disputes are shown beside it. It appears in the window,
+  tooltips, the minimap button and reports.
 - Griefing protection: other players can never disqualify you or make you
   Unverified. Witness claims are recorded by name and shown in Verify with how
   many witnesses back them. Messages from players outside your guild or group

@@ -633,6 +633,7 @@ do
 	check(SF.LogCount() == logBefore, "witness claims never go into your log")
 	local _, dispute = SF.GapWitnesses(gap)
 	check(#dispute == 1 and dispute[1] == "Carl-TestRealm", "claim counted as a dispute")
+	check(select(4, SF.WitnessRating()) == 1 and SF.RatingText(0, 1):find("(1 disputed)", 1, true), "dispute shown beside the witness rating")
 
 	Cover(gap.to - 30)
 	check(gap.cov == gap.to - 30 and gap.by == "Bob-TestRealm", "valid sighting recovers the gap")
@@ -856,6 +857,94 @@ check(#SelfFoundCharDB.log <= 4000 and SF.LogCount() == 4201, "log trimmed, coun
 local trimmed = Logout()
 Boot(trimmed, { played = ServerPlayed() })
 check(SF.integrity.ok, "trimmed log verifies after reload")
+
+-- ---------------------------------------------------------------------------
+-- 9. Witness rating
+-- ---------------------------------------------------------------------------
+
+Fresh()
+do
+	local function Body(rt, wp, dp)
+		return string.format("C|5|100|0|0|0|0|abcd1234|MAGE|0|1|1.0.0%s", rt and string.format("|%d|%d|%d", rt, wp, dp) or "")
+	end
+	local function Known(name, ...) Fire("CHAT_MSG_ADDON", "SelfFound", "H1|" .. Body(...), "GUILD", name) end
+	local function Ack(name) Fire("CHAT_MSG_ADDON", "SelfFound", "A1|" .. Body(), "WHISPER", name) end
+
+	local tier, pct = SF.WitnessRating()
+	check(tier == 0 and pct == 0, "new run is Unwitnessed")
+
+	local names = { "Wa", "Wb", "Wc", "Wd", "We" }
+	for _, n in ipairs(names) do Known(n) end
+	for _ = 1, 8 do
+		for _, n in ipairs(names) do Ack(n) end
+		Advance(900)
+	end
+	tier, pct = SF.WitnessRating()
+	check(tier == 3 and pct >= 75, "fully witnessed by 5 players => Heavily witnessed", tier .. " " .. pct)
+
+	Ack("Stranger")
+	check(select(3, SF.WitnessRating()) == 5, "strangers can't count as witnesses")
+
+	Advance(900 * 8) -- solo play
+	tier, pct = SF.WitnessRating()
+	check(tier == 2 and pct >= 40 and pct < 75, "half witnessed => Well witnessed", tier .. " " .. pct)
+	Advance(900 * 14)
+	tier, pct = SF.WitnessRating()
+	check(tier == 1 and pct >= 10 and pct < 40, "mostly solo => Lightly witnessed", tier .. " " .. pct)
+
+	-- Heartbeats carry tier, witnessed %, disputes (fields 13-15)
+	W.sent = {}
+	SF.Broadcast(true)
+	local fields
+	for _, s in ipairs(W.sent) do
+		if s[2]:match("^H1|") then fields = {} for f in (s[2] .. "|"):gmatch("(.-)|") do fields[#fields + 1] = f end end
+	end
+	check(fields and tonumber(fields[14]) == tier and tonumber(fields[15]) == pct and tonumber(fields[16]) == 0, "heartbeat carries the rating", fields and table.concat(fields, ","))
+
+	-- Other players' ratings: recorded and shown in tooltips
+	Known("Rated", 2, 55, 1)
+	local rec = SelfFoundDB.witness["Rated-TestRealm"]
+	check(rec.latest.rt == 2 and rec.latest.wp == 55 and rec.latest.dp == 1, "others' rating recorded")
+	local lines = {}
+	local tip = NewMock("GameTooltip")
+	tip.GetUnit = function() return "Rated", "mouseover" end
+	tip.AddLine = function(_, text) lines[#lines + 1] = text end
+	local realTooltip, realUnitName = _G.GameTooltip, _G.UnitName
+	_G.GameTooltip = tip
+	_G.UnitName = function(u) if u == "player" then return "Tester" end return "Rated" end
+	W.tooltipPost(tip)
+	_G.GameTooltip, _G.UnitName = realTooltip, realUnitName
+	check(lines[1] and lines[1]:find("Well witnessed", 1, true) and lines[1]:find("(1 disputed)", 1, true), "tooltip shows their rating and disputes", lines[1])
+
+	-- Reports and Verify
+	local r = SF.BuildReport()
+	check(r.rating == tier and r.witnessedPct == pct and r.disputes == 0, "report carries the rating")
+	check(SF.ReportSummary(r):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "report summary shows the rating")
+	check(table.concat(select(2, SF.VerifyReport(r)), " "):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "Verify shows the rating")
+
+	-- Sealed and persisted
+	local saved = Logout()
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.integrity.ok and SF.run.coverage.n == 8, "coverage survives a reload", SF.run.coverage.n)
+
+	-- UI paths with a rating present
+	SlashCmdList.SELFFOUND("")
+	for i = 1, 4 do SF.UI.SelectTab(i) end
+	SlashCmdList.SELFFOUND("status")
+	for _, m in ipairs(allMocks) do
+		if m.__scripts.OnEnter then m.__scripts.OnEnter(m) end
+	end
+	check(#W.errors == 0, "rating UI paths run without errors", W.errors[1])
+
+	-- One friend witnessing everything isn't enough for a high rating
+	Fresh()
+	Known("Buddy")
+	for _ = 1, 8 do Ack("Buddy"); Advance(900) end
+	tier, pct = SF.WitnessRating()
+	check(tier == 1 and pct >= 75, "fully witnessed by a single player => only Lightly witnessed", tier .. " " .. pct)
+	for _, n in ipairs({ "Pa", "Pb" }) do Known(n); Ack(n) end
+	check(SF.WitnessRating() == 2, "three witnesses => Well witnessed")
+end
 
 print(string.format("\n%d passed, %d failed, %d errors", pass, fail, #W.errors))
 FAILURES = fail + #W.errors

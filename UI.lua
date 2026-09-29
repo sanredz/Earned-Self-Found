@@ -236,6 +236,31 @@ local function BuildOverview(page)
 	status.icon:SetPoint("LEFT", 20, 0)
 	status.word = Text(status, "GameFontNormalHuge")
 	status.word:SetPoint("TOPLEFT", status.icon, "TOPRIGHT", 16, -2)
+	status.rating = Text(status, "GameFontNormalLarge")
+	status.rating:SetPoint("BOTTOMLEFT", status.word, "BOTTOMRIGHT", 12, 2)
+	-- Hovering the banner explains the witness rating.
+	status:EnableMouse(true)
+	status:SetScript("OnEnter", function(self)
+		local tier, pct, witnesses, disputes = SF.WitnessRating()
+		local lines = {
+			{ SF.RatingText(tier, disputes) },
+			string.format("%d%% of your play time was witnessed, by %d different player%s.", pct, witnesses, witnesses == 1 and "" or "s"),
+			{ " " },
+			{ "The status is decided only by your own actions. The witness rating shows how well other players can vouch for it:", 0.8, 0.8, 0.8 },
+			{ "Lightly: 10% of play time witnessed, 1+ witness", 0.85, 0.85, 0.85 },
+			{ "Well: 40%, 3+ witnesses", 0.45, 0.75, 1 },
+			{ "Heavily: 75%, 5+ witnesses", 1, 0.82, 0 },
+		}
+		if disputes > 0 then
+			lines[#lines + 1] = { " " }
+			lines[#lines + 1] = { string.format("%d witness%s claimed a violation during untracked play time. Claims are shown to anyone verifying your report, but never change your status.",
+				disputes, disputes == 1 and "" or "es"), 1, 0.6, 0.2 }
+		end
+		lines[#lines + 1] = { " " }
+		lines[#lines + 1] = { "Play with guild or group members running " .. SF.NAME .. " to raise it.", 0.6, 0.6, 0.6 }
+		Tooltip(self, "Witness rating", lines)
+	end)
+	status:SetScript("OnLeave", HideTooltip)
 	status.reason = Text(status, "GameFontHighlight")
 	status.reason:SetPoint("TOPLEFT", status.word, "BOTTOMLEFT", 0, -6)
 	status.reason:SetPoint("RIGHT", status, "RIGHT", -200, 0)
@@ -360,6 +385,8 @@ local function RefreshOverview(page)
 	s.bar:SetColorTexture(color[1], color[2], color[3], 0.9)
 	s.icon:SetTexture(STATUS_ICON[status])
 	s.word:SetText(SF.Colorize(status, color))
+	local tier, pct, witnessCount, disputes = SF.WitnessRating()
+	s.rating:SetText(SF.RatingText(tier, disputes))
 	s.reason:SetText(reason)
 	local className, classFile = UnitClass("player")
 	local raceName = UnitRace("player")
@@ -407,7 +434,11 @@ local function RefreshOverview(page)
 	t.mail.tip = { "Items or gold taken from mail another player sent.", string.format("Mail sent: %d", stats.mailSent) }
 	local witnesses = SF.WitnessList()
 	t.witnesses.value:SetText(Number(#witnesses))
-	t.witnesses.tip = { "Other players running " .. SF.NAME .. " whose addon recorded your progress." }
+	t.witnesses.tip = {
+		"Other players running " .. SF.NAME .. " whose addon recorded your progress.",
+		string.format("%d%% of your play time was witnessed.", pct),
+		"Rating: " .. SF.RatingText(tier, disputes),
+	}
 
 	for _, tile in pairs(t) do
 		local danger = (tile == t.trades and stats.trades > 0) or (tile == t.auctions and (stats.ahBids + stats.ahBuyouts + stats.ahListed) > 0)
@@ -630,7 +661,8 @@ local function InitWitnessedRow(row, data)
 			end
 			local l = d.rec.latest or {}
 			Tooltip(self, d.name, {
-				"Status: " .. SF.StatusText(l.s or "?"),
+				"Status: " .. SF.StatusText(l.s or "?") .. (l.rt and ("  " .. SF.RatingText(l.rt, l.dp)) or ""),
+				l.wp and string.format("%d%% of their play time witnessed", l.wp) or "Witness rating: unknown (older version)",
 				string.format("Level %d, %s played", l.lvl or 0, SF.Duration(l.pl)),
 				string.format("Deaths %d, violations %d, untracked %s", l.d or 0, l.v or 0, SF.Duration(l.g)),
 				{ string.format("Seen %d times; first %s, last %s", d.rec.n or 0, SF.Date(d.rec.first), SF.Ago(d.rec.last)), 0.6, 0.6, 0.6 },
@@ -697,9 +729,13 @@ local function BuildWitnesses(page)
 	end)
 	now:SetPoint("TOPRIGHT", -8, -14)
 	now:SetScript("OnEnter", function(self)
-		Tooltip(self, "Broadcast now", { "Your progress is shared automatically every few minutes with guild and group members running " .. SF.NAME .. ".", "Use this to share it right away, e.g. after joining a group." })
+		Tooltip(self, "Broadcast now", { "Your progress is shared automatically every minute with guild and group members running " .. SF.NAME .. ".", "Use this to share it right away, e.g. after joining a group." })
 	end)
 	now:SetScript("OnLeave", HideTooltip)
+	page.rating = Text(settings, "GameFontNormal", "RIGHT")
+	page.rating:SetPoint("BOTTOMRIGHT", now, "BOTTOMLEFT", -14, 13)
+	page.coverage = Text(settings, "GameFontDisableSmall", "RIGHT")
+	page.coverage:SetPoint("TOPRIGHT", page.rating, "BOTTOMRIGHT", 0, -3)
 
 	local seen = Panel(page, "Players you've witnessed")
 	seen:SetPoint("TOPLEFT", 4, -58)
@@ -738,6 +774,10 @@ local function RefreshWitnesses(page)
 	local mine = SF.WitnessList()
 	page.mineList:SetList(mine)
 	page.minePanel.title:SetText(string.format("Your witnesses (%d)", #mine))
+
+	local tier, pct, _, disputes = SF.WitnessRating()
+	page.rating:SetText(SF.RatingText(tier, disputes))
+	page.coverage:SetText(string.format("%d%% of your play time witnessed", pct))
 end
 
 -- ------------------------------ Frame ------------------------------------
@@ -1073,7 +1113,9 @@ SlashCmdList.SELFFOUND = function(msg)
 		UI.Toggle()
 	elseif msg == "status" then
 		local status, reason = SF.GetStatus()
-		SF.Print(SF.Colorize(status, StatusColor(status)) .. " - " .. reason)
+		local tier, pct, _, disputes = SF.WitnessRating()
+		SF.Print(SF.Colorize(status, StatusColor(status)) .. "  " .. SF.RatingText(tier, disputes) .. " - " .. reason)
+		SF.Print(string.format("%d%% of your play time was witnessed.", pct))
 	elseif msg == "share" or msg == "export" then
 		UI.ShowExport()
 	elseif msg == "verify" then
@@ -1103,7 +1145,11 @@ end
 function SelfFound_OnAddonCompartmentEnter(_, button)
 	local owner = button or (AddonCompartmentFrame) or UIParent
 	local status, reason = SF.GetStatus()
-	Tooltip(owner, SF.TITLE, { SF.Colorize(status, StatusColor(status)), { reason, 0.8, 0.8, 0.8 }, { "Click to open", 0.6, 0.6, 0.6 } })
+	local rating = ""
+	if SF.run then
+		rating = "  " .. SF.RatingText(select(1, SF.WitnessRating()), select(4, SF.WitnessRating()))
+	end
+	Tooltip(owner, SF.TITLE, { SF.Colorize(status, StatusColor(status)) .. rating, { reason, 0.8, 0.8, 0.8 }, { "Click to open", 0.6, 0.6, 0.6 } })
 end
 
 function SelfFound_OnAddonCompartmentLeave()
