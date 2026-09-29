@@ -44,6 +44,12 @@ First release.
   (Well / Partly / Barely witnessed) and named flags (saw a
   disqualification, saw you online without Earned). It's calculated by the
   person checking, never self-reported.
+- Flags: witnesses flag a player whose addon said DISQUALIFIED and later
+  claims fewer violations, or who was online without the addon for 10+
+  minutes. Flags are signed, shared with every witness, re-announced when
+  the player is around, and shown in tooltips once 2+ players reported them,
+  even if the player's own addon claims CLEAN or stays silent. They never
+  change anyone's status.
 - Who was there: witnesses tell you when they saw your level-up or death,
   and your log shows who.
 - Chat-command protection: the addon works on a private copy of its data

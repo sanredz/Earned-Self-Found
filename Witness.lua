@@ -379,41 +379,49 @@ local function AddTooltipLine(tooltip)
 	-- One fact per line:
 	--   Self Found: CLEAN   level 12, seen 5m ago     (their addon's claim)
 	--   You witnessed 12h of their play               (your own records)
-	--   You saw them disqualified / online without Earned (flags, if any)
-	local status, detail, otherRec
+	--   (!) Flagged by 2 players: Carl, Dana          (shared witness flags)
+	local status, detail, otherRec, key
 	if SF.Safe(UnitIsUnit(unit, "player")) then
 		status = select(3, SF.GetStatus())
-		detail = string.format("|cffaaaaaawitnessed by %d players|r", SF.WitnessCount())
+		key = SF.playerKey
 	else
 		local name, realm = UnitName(unit)
 		name, realm = SF.Safe(name), SF.Safe(realm)
 		if not name then
 			return
 		end
-		local key = name .. "-" .. ((realm and realm ~= "") and realm or SF.RealmName())
+		key = name .. "-" .. ((realm and realm ~= "") and realm or SF.RealmName())
 		local rec = SF.db.witness[key]
-		if not (rec and rec.latest) then
-			return
+		if rec and rec.latest then
+			local l = rec.latest
+			otherRec = rec
+			status = l.s
+			detail = string.format("|cffaaaaaalevel %d, seen %s|r", l.lvl or 0, SF.Ago(rec.last))
+		elseif not SF.FlagLine(key) then
+			return -- never heard of them, and nobody flagged them
 		end
-		local l = rec.latest
-		otherRec = rec
-		status = l.s
-		detail = string.format("|cffaaaaaalevel %d, seen %s|r", l.lvl or 0, SF.Ago(rec.last))
 	end
 
-	tooltip:AddLine("Self Found: " .. SF.StatusText(status) .. (detail and ("  " .. detail) or ""))
+	-- Their status as their own addon reports it; flags below come from
+	-- other witnesses and are shown even if their addon never spoke to us
+	-- (a cheater who switched broadcasting off entirely).
+	if status then
+		tooltip:AddLine("Self Found: " .. SF.StatusText(status) .. (detail and ("  " .. detail) or ""))
+	else
+		tooltip:AddLine("Self Found: |cff888888no status from their addon|r")
+	end
 	-- What *you* saw of them.
 	local summary = otherRec and SF.WitnessSummary and SF.WitnessSummary(otherRec)
 	if summary and summary.hours > 0 then
 		tooltip:AddLine(string.format("You witnessed %dh of their play", summary.hours), 0.75, 0.75, 0.75)
 	end
-	if summary and (summary.sawD or summary.maxV > 0) and status ~= "D" then
-		tooltip:AddLine("You saw them disqualified before", 1, 0.28, 0.28)
-	end
 	if summary and summary.silentNow then
 		tooltip:AddLine("Online without Earned running right now", 1, 0.6, 0.2)
-	elseif summary and summary.lastSilent and time() - summary.lastSilent < 7 * 86400 then
-		tooltip:AddLine(string.format("Seen online without Earned: %s (%s)", SF.Duration(summary.silentSecs), SF.Ago(summary.lastSilent)), 1, 0.6, 0.2)
+	end
+	-- Flags witnesses shared (about yourself: shown even if only one).
+	local flagText, flagColor = SF.FlagLine(key, status, key == SF.playerKey)
+	if flagText then
+		tooltip:AddLine(flagText, flagColor[1], flagColor[2], flagColor[3])
 	end
 	tooltip:Show()
 end
@@ -445,15 +453,6 @@ function SF.WitnessList()
 		return a.n > b.n
 	end)
 	return list
-end
-
--- How many different players' addons have recorded you.
-function SF.WitnessCount()
-	local count = 0
-	for _ in pairs(SF.run and SF.run.witnessedBy or {}) do
-		count = count + 1
-	end
-	return count
 end
 
 function SF.BuildReport()
@@ -618,6 +617,16 @@ function SF.VerifyReport(report)
 	local rec = SF.db.witness[report.char or ""]
 	if report.integrity == 0 then
 		contradictions[#contradictions + 1] = "The addon itself detected that their saved data was edited outside the game."
+	end
+
+	-- Flags witnesses shared about them (signed, shown with names).
+	local flags = SF.FlagsFor and SF.FlagsFor(report.char or "", report.status == "DISQUALIFIED" and "D" or nil) or {}
+	for i, f in ipairs(flags) do
+		if i > 6 then
+			notes[#notes + 1] = string.format("...and %d more flags (see their profile).", #flags - 6)
+			break
+		end
+		notes[#notes + 1] = string.format("|cffff9933Flag:|r %s %s (%s).", f.by == SF.playerKey and "You" or SF.ShortName(f.by), SF.FlagText(f), SF.Date(f.t))
 	end
 
 	-- Crash recoveries, with the witnesses who confirmed them.

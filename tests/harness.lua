@@ -999,8 +999,8 @@ do
 	check(#val == 1 and val[1][1] == 4 and val[1][2] == 6, "adjacent hours merge into one range")
 
 	-- Flags: shown with names, never subtracted
-	Reply("Ned", 100, 10 * H, nil, 1)
-	Reply("Pat", 100, 10 * H, nil, nil, 1)
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("F1|Hal-TestRealm|undq|%d|0|1", time() - 50), "GUILD", "Ned")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("F1|Hal-TestRealm|noaddon|%d|720|0", time() - 40), "GUILD", "Pat")
 	rec = SF.Profile("Hal-TestRealm").record
 	local text = {}
 	for _, f in ipairs(rec.flags) do text[#text + 1] = f.who .. " " .. f.text end
@@ -1102,6 +1102,131 @@ do
 	check(not gap.cov, "and the gap isn't recovered by it")
 	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|D|1|0|0|%s", gap.from, seen, SF.Token(seen, "D", 1)), "WHISPER", "Carl")
 	check(#SF.run.violations == 1, "not counted twice")
+end
+
+-- ---------------------------------------------------------------------------
+-- 9b. Flags: witnesses catch offenses, sign them, and share them
+-- ---------------------------------------------------------------------------
+
+Fresh()
+do
+	local function Beat(who, s, v, pl, lvl)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|%s|%d|%d|0|%d|0|0|abcd1234|MAGE|0|7|1.0.0|tk", s, lvl or 20, pl or 50000, v), "GUILD", who)
+	end
+	local function Flag(from, target, kind, channel, t)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("F1|%s|%s|%d|%d|%d", target, kind, t or (time() - 30), kind == "noaddon" and 900 or 0, kind == "undq" and 1 or 0), channel or "GUILD", from)
+	end
+	local function Sent(pattern)
+		local n = 0
+		for _, m in ipairs(W.sent) do if m[2]:match(pattern) then n = n + 1 end end
+		return n
+	end
+
+	-- Ace gets disqualified; his (tampered) addon later claims clean
+	W.sent = {}
+	Beat("Ace", "C", 0, 50000)
+	Beat("Ace", "D", 1, 50060)
+	check(SF.FlagSummary("Ace-TestRealm").count == 0, "an admitted DQ is not a flag")
+	Beat("Ace", "C", 0, 50120)
+	local sum = SF.FlagSummary("Ace-TestRealm")
+	check(sum.count == 1 and sum.mine and sum.red, "DISQUALIFIED then claiming clean => we flag them")
+	check(Sent("^F1|Ace%-TestRealm|undq|") == 1, "the flag is announced to guild/group")
+	Beat("Ace", "C", 0, 50180)
+	check(SF.FlagSummary("Ace-TestRealm").count == 1, "one flag per offense, not per heartbeat")
+	Beat("Ace", "D", 2, 50240)
+	Beat("Ace", "C", 0, 50300)
+	check(SF.FlagSummary("Ace-TestRealm").count == 2, "a new, bigger offense is a new flag")
+	check(#SF.FlagsFor("Ace-TestRealm", "D") == 0 and #SF.FlagsFor("Ace-TestRealm", "C") == 2, "flags about DQs are hidden while they admit it")
+
+	-- Same name, genuinely new character (played and level both went down)
+	Beat("Neo", "D", 1, 90000, 30)
+	Beat("Neo", "C", 0, 100, 1)
+	check(SF.FlagSummary("Neo-TestRealm").count == 0, "a new character with the same name isn't flagged")
+	-- Same character, saved data wiped after a DQ: played continues
+	Beat("Wip", "D", 1, 90000, 30)
+	Beat("Wip", "C", 0, 90100, 30)
+	check(SF.FlagSummary("Wip-TestRealm").count == 1, "wiping saved data after a DQ is flagged")
+
+	-- Receiving flags from other witnesses
+	for _, n in ipairs({ "Bea", "Cy", "Dot" }) do Beat(n, "C", 0) end
+	Flag("Bea", "Dex-TestRealm", "noaddon")
+	check(SF.FlagSummary("Dex-TestRealm").count == 1, "known witness's flag stored")
+	check(SF.FlagLine("Dex-TestRealm", "C") == nil, "one reporter alone: not in tooltips")
+	Flag("Bea", "Dex-TestRealm", "noaddon")
+	check(SF.FlagSummary("Dex-TestRealm").count == 1, "duplicates ignored")
+	Flag("Stranger", "Dex-TestRealm", "undq")
+	Flag("Dex", "Dex-TestRealm", "undq")
+	Flag("Cy", "Dex-TestRealm", "bogus")
+	check(SF.FlagSummary("Dex-TestRealm").count == 1, "strangers, self-flags and unknown kinds ignored")
+	Flag("Cy", "Dex-TestRealm", "undq")
+	local line = SF.FlagLine("Dex-TestRealm", "C")
+	check(line and line:find("Flagged by 2 players: Bea, Cy", 1, true), "2+ independent reporters: tooltip warning", line)
+
+	-- A flagged player whose addon never spoke to us (broadcasting switched
+	-- off): the tooltip still shows what other witnesses reported
+	Flag("Bea", "Ghost-TestRealm", "noaddon")
+	Flag("Cy", "Ghost-TestRealm", "noaddon")
+	local lines = {}
+	local tip = NewMock("GameTooltip")
+	tip.GetUnit = function() return "Ghost", "mouseover" end
+	tip.AddLine = function(_, t) lines[#lines + 1] = t end
+	local realTooltip, realUnitName = _G.GameTooltip, _G.UnitName
+	_G.GameTooltip = tip
+	_G.UnitName = function(unit) if unit == "player" then return "Tester" end return "Ghost" end
+	W.tooltipPost(tip)
+	_G.GameTooltip, _G.UnitName = realTooltip, realUnitName
+	check(#lines == 2 and lines[1]:find("no status from their addon", 1, true) and lines[2]:find("Flagged by 2 players", 1, true),
+		"tooltip shows others' flags even for a player whose addon never spoke", table.concat(lines, " / "))
+
+	-- Flags about me: stored, told, shown
+	W.chat = {}
+	Flag("Dot", SF.playerKey, "noaddon", "WHISPER")
+	check(SF.FlagSummary(SF.playerKey).count == 1 and table.concat(W.chat, " "):find("Dot flagged you", 1, true), "you're told when someone flags you")
+	check(SF.FlagLine(SF.playerKey, nil, true) ~= nil, "your own flags show in your UI even with one reporter")
+
+	-- Long silence becomes a flag; short silence doesn't
+	W.roster = { { name = "Sil-TestRealm", online = true }, { name = "Brief-TestRealm", online = true } }
+	Beat("Sil", "C", 0)
+	Beat("Brief", "C", 0)
+	Advance(360)                          -- both quiet 6 minutes (we've listened 5+)
+	Beat("Brief", "C", 0)                 -- Brief's addon speaks again after ~6m
+	Advance(900)                          -- Sil stays quiet 20+ minutes
+	Beat("Sil", "C", 0)
+	check(SF.FlagSummary("Sil-TestRealm").count == 1 and SF.FlagsFor("Sil-TestRealm")[1].k == "noaddon", "10+ minutes online without Earned => flag")
+	check(SF.FlagSummary("Brief-TestRealm").count == 0, "a short silence is only a note, not a flag")
+
+	-- Answering a question hands over our own flags
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Ace-TestRealm", "GUILD", "Bea")
+	Advance(3)
+	check(Sent("^F1|Ace%-TestRealm|undq|") == 2, "answers include our flags about them")
+
+	-- Verify shows the flags we hold about that player
+	local vnotes = table.concat(select(2, SF.VerifyReport({ char = "Dex-TestRealm", status = "CLEAN", level = 20, played = 50000, stats = {}, violations = {}, gapTotal = 0, integrity = 1, witnesses = {} })), " | ")
+	check(vnotes:find("Flag:", 1, true) and vnotes:find("Bea", 1, true) and vnotes:find("Cy", 1, true), "Verify lists flags about them", vnotes)
+
+	-- Flags in the profile, with names
+	local rec = SF.Profile("Dex-TestRealm").record
+	check(#rec.flags == 2 and rec.reporters == 2, "profile lists the flags with names")
+	SF.UI.ShowProfile("Ace-TestRealm")
+	SF.UI.ShowProfile(SF.playerKey)
+	SlashCmdList.SELFFOUND("")
+	for i = 1, 4 do SF.UI.SelectTab(i) end
+	SlashCmdList.SELFFOUND("status")
+	for _, m in ipairs(allMocks) do
+		if m.__scripts.OnEnter then m.__scripts.OnEnter(m) end
+	end
+	check(#W.errors == 0, "UI with flags runs", W.errors[1])
+
+	-- Re-announced when the flagged player is around again (once per session)
+	local saved = Logout()
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.FlagSummary("Ace-TestRealm").count == 2, "flags saved")
+	W.sent = {}
+	Beat("Ace", "C", 0, 50400)
+	check(Sent("^F1|Ace%-TestRealm|") == 2, "our flags re-announced when they're online")
+	Beat("Ace", "C", 0, 50460)
+	check(Sent("^F1|Ace%-TestRealm|") == 2, "...once per session")
 end
 
 -- ---------------------------------------------------------------------------
@@ -1358,7 +1483,12 @@ do
 	W1("Carl", "Else-TestRealm", "C", 0, 0)
 	W1("Dana", "Gus-TestRealm", "C", 0, 0, "GUILD")
 	local p = SF.Profile("Gus-TestRealm")
-	check(#p.others == 2 and #p.record.flags == 3, "replies from known witnesses counted (Dana: DQ + no addon; you: no addon)", #p.record.flags)
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("F1|Gus-TestRealm|undq|%d|0|1", time() - 50), "WHISPER", "Dana")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("F1|Gus-TestRealm|noaddon|%d|900|0", time() - 40), "WHISPER", "Dana")
+	p = SF.Profile("Gus-TestRealm")
+	local fromDana = 0
+	for _, f in ipairs(p.record.flags) do if f.who == "Dana" then fromDana = fromDana + 1 end end
+	check(#p.others == 2 and fromDana == 2, "replies counted; Dana's flags listed with her name", #p.record.flags)
 	check(p.others[1] and SF.queries["Gus-TestRealm"].replies["Stranger-TestRealm"] == nil, "strangers' replies ignored")
 	check(SF.queries["Gus-TestRealm"].replies["Gus-TestRealm"] == nil, "nobody vouches for themselves")
 	check(SF.queries["Else-TestRealm"] == nil, "replies to questions we never asked are ignored")

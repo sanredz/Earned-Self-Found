@@ -136,8 +136,7 @@ Witness record     Well witnessed · no flags
   `/played` they heard your addon in. When someone asks, all answers are
   combined into the bar: how much of your play time other people's addons
   can account for. It fills up as you play with other Earned players.
-- **Flags.** Only things that don't fit a clean run, each with a name: a
-  witness saw you disqualified, or saw you online without Earned running.
+- **Flags** (see below), each with the name of the witness who caught it.
 - **Verdict:** **Well witnessed** (75%+ of hours, from at least 3
   witnesses), **Partly witnessed** (25%+), or **Barely witnessed**. It says
   "(all from 1 player)" if only one witness backs it.
@@ -146,6 +145,28 @@ It's always calculated by the person checking, from everyone else's
 records, never from what your own addon claims. So it can't be faked, and
 a big guild only helps if people were actually online while you played.
 Flags are shown, never subtracted: you judge them yourself.
+
+### Flags: offenses witnesses caught
+
+Your addon keeps an eye on everyone it witnesses. It **flags** a player when:
+- their addon said **DISQUALIFIED** (or had violations), and later claims
+  fewer. Violations never disappear legitimately, so their record was edited,
+  tampered with or wiped.
+- they're **online without Earned** for 10+ minutes (see below).
+
+The evidence lives with the witnesses, never with the accused, whose addon
+may be the tampered one:
+- A flag is signed with the witness's name and announced to the guild and
+  group. It's announced again whenever the flagged player is online or
+  someone asks about them, so players who weren't there learn it too.
+- Tooltips show it once **2 or more different players** reported it, even
+  if the flagged player's addon says CLEAN or sends nothing at all:
+  *"Flagged by 3 players: Carl, Dana, Eve"*. One troll alone can't brand
+  anyone. The profile lists every flag with names and dates.
+- If you get flagged, your addon tells you in chat and shows it in My
+  profile, so a mistake can be talked through.
+- Flags never change anyone's status. They're evidence, with names
+  attached, for people to judge.
 
 ### Online without Earned
 
@@ -183,6 +204,9 @@ shows it: *"Reached level 20, witnessed by 3"* (hover it for the names).
 - What witnesses tell you when you ask about a player is shown with their
   names, as information. A witness can't claim more hours than it actually
   heard heartbeats for.
+- Flags are only accepted straight from the witness who saw it, never
+  passed on second-hand, and need 2+ different reporters to show in
+  tooltips.
 - The one exception proves itself: if a witness echoes a token showing that
   *your own addon* broadcast a disqualification before the game closed
   without saving, that disqualification is restored. It's your addon's word,

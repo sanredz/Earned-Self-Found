@@ -53,7 +53,10 @@ local function ShowTooltip(self)
 	local color = SF.COLOR[status] or SF.COLOR.GRAY
 	GameTooltip:AddLine(status, color[1], color[2], color[3])
 	if SF.run then
-		GameTooltip:AddLine(string.format("Witnessed by %d players", SF.WitnessCount()), 0.7, 0.7, 0.7)
+		local flagText, flagColor = SF.FlagLine(SF.playerKey, nil, true)
+		if flagText then
+			GameTooltip:AddLine(flagText, flagColor[1], flagColor[2], flagColor[3], true)
+		end
 	end
 	GameTooltip:AddLine(reason, 0.85, 0.85, 0.85, true)
 	if SF.run then

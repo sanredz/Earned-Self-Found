@@ -189,7 +189,6 @@ local function MineLines(p)
 	if p.isSelf then
 		local _, reason = SF.GetStatus()
 		Add(reason)
-		Add(string.format("Recorded by %s.", Plural(SF.WitnessCount(), "player")))
 		local recovered = SF.RecoveredGaps()
 		if SF.OpenGapTotal() > 0 then
 			Add("Untracked play time: " .. SF.Duration(SF.OpenGapTotal()), SF.COLOR.UNVERIFIED)

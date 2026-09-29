@@ -244,7 +244,8 @@ local function BuildOverview(page)
 		Tooltip(self, "Status and witnesses", {
 			{ "Your status is decided only by your own actions, seen by your own addon.", 1, 1, 1 },
 			{ " " },
-			{ string.format("Witnesses back it up: %d players' addons have recorded you. Open My profile (Witnesses tab) and ask them to see how many of your played hours they can account for.", SF.WitnessCount()), 0.8, 0.8, 0.8 },
+			{ "Other players' addons witness your run. If one catches something that doesn't fit a clean run, it flags you, with its name on it, and every witness can see it. Flags never change your status.", 0.8, 0.8, 0.8 },
+			{ "See My profile in the Witnesses tab for your witnessed hours and any flags.", 0.6, 0.6, 0.6 },
 		})
 	end)
 	status:SetScript("OnLeave", HideTooltip)
@@ -372,8 +373,8 @@ local function RefreshOverview(page)
 	s.bar:SetColorTexture(color[1], color[2], color[3], 0.9)
 	s.icon:SetTexture(STATUS_ICON[status])
 	s.word:SetText(SF.Colorize(status, color))
-	local witnessCount = SF.WitnessCount()
-	s.witnessed:SetText(witnessCount > 0 and string.format("witnessed by %d player%s", witnessCount, witnessCount == 1 and "" or "s") or "")
+	local flagText, flagColor = SF.FlagLine(SF.playerKey, nil, true)
+	s.witnessed:SetText(flagText and SF.Colorize(flagText, flagColor) or "")
 	s.reason:SetText(reason)
 	local className, classFile = UnitClass("player")
 	local raceName = UnitRace("player")
@@ -685,10 +686,11 @@ local function InitWitnessedRow(row, data)
 	row.level:SetText("Lvl " .. (l.lvl or "?"))
 	local summary = SF.WitnessSummary(data.rec)
 	row.hours:SetText(summary and summary.hours .. "h" or "")
-	if summary and (summary.sawD or summary.maxV > 0) and l.s ~= "D" then
-		row.flag:SetText(SF.Colorize("saw DQ", SF.COLOR.DISQUALIFIED))
-	elseif summary and summary.silentN > 0 then
-		row.flag:SetText("no addon: " .. SF.Duration(summary.silentSecs))
+	local flags = SF.FlagSummary(data.name, l.s)
+	if flags.count > 0 then
+		row.flag:SetText(SF.Colorize(string.format("%d flag%s", flags.count, flags.count == 1 and "" or "s"), flags.red and SF.COLOR.DISQUALIFIED or { 1, 0.6, 0.2 }))
+	elseif summary and summary.silentNow then
+		row.flag:SetText("no addon now")
 	else
 		row.flag:SetText("")
 	end
@@ -734,7 +736,10 @@ local WITNESS_HELP = {
 	{ " " },
 	{ "Why it matters: your own saved data lives on your computer, but these records live on other people's computers, so they can't be faked or erased. Click any player (or search) to see everything recorded about them, and ask other witnesses what they saw.", 0.8, 0.8, 0.8 },
 	{ " " },
-	{ "Witnesses also recover crashes, and notice when someone is online without " .. SF.NAME .. " running.", 0.6, 0.6, 0.6 },
+	{ " " },
+	{ "Flags: if your addon catches someone breaking the pattern of a clean run (their addon said DISQUALIFIED and later claims fewer violations, or they're online without " .. SF.NAME .. " for 10+ minutes), it flags them with your name, and every witness learns it. Tooltips show flags once 2+ players reported them. Flags never change anyone's status.", 0.8, 0.8, 0.8 },
+	{ " " },
+	{ "Witnesses also recover crashes.", 0.6, 0.6, 0.6 },
 }
 
 -- Search box with a suggestion dropdown: find any player you know (or type
@@ -962,8 +967,8 @@ function RefreshWitnesses(page)
 	page.mineList:SetList(mine)
 	page.minePanel.title:SetText(string.format("Your witnesses (%d)", #SF.WitnessList()))
 
-	local count = SF.WitnessCount()
-	page.witnessedBy:SetText(string.format("Witnessed by %d player%s", count, count == 1 and "" or "s"))
+	local flagText, flagColor = SF.FlagLine(SF.playerKey, nil, true)
+	page.witnessedBy:SetText(flagText and SF.Colorize(flagText, flagColor) or SF.Colorize("No flags on you", SF.COLOR.GRAY))
 end
 
 -- ------------------------------ Frame ------------------------------------
@@ -1322,7 +1327,10 @@ SlashCmdList.SELFFOUND = function(msg)
 	elseif msg == "status" then
 		local status, reason = SF.GetStatus()
 		SF.Print(SF.Colorize(status, StatusColor(status)) .. " - " .. reason)
-		SF.Print(string.format("Witnessed by %d players. /sf check to see your witnessed hours.", SF.WitnessCount()))
+		local flagText = SF.FlagLine(SF.playerKey, nil, true)
+		if flagText then
+			SF.Print(flagText .. " (see /sf check)")
+		end
 	elseif msg == "share" or msg == "export" then
 		UI.ShowExport()
 	elseif msg == "verify" then
@@ -1369,7 +1377,6 @@ function SelfFound_OnAddonCompartmentEnter(_, button)
 	Tooltip(owner, SF.TITLE, {
 		SF.Colorize(status, StatusColor(status)),
 		{ reason, 0.8, 0.8, 0.8 },
-		{ string.format("Witnessed by %d players", SF.WitnessCount()), 0.7, 0.7, 0.7 },
 		{ "Click to open", 0.6, 0.6, 0.6 },
 	})
 end
