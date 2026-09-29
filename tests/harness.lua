@@ -1037,6 +1037,19 @@ do
 	Boot(saved, { played = ServerPlayed() })
 	check(SelfFoundCharDB.key == nil and type(SF.cdb.key) == "string", "secret key not reachable from chat during play")
 
+	-- TEMPORARY /sf preview clean: display only, never shared
+	SlashCmdList.SELFFOUND("preview clean")
+	check(SF.GetStatus() == "CLEAN" and SF.WitnessRating() == 3, "clean preview shows CLEAN + Heavily witnessed")
+	check(SF.GetStatus(true) == "DISQUALIFIED" and SF.BuildReport().status == "DISQUALIFIED" and SF.BuildReport().rating == 0, "clean preview never reaches reports")
+	W.sent = {}
+	SF.Broadcast(true)
+	check(W.sent[1] and W.sent[1][2]:match("^H1|D|"), "clean preview never reaches heartbeats")
+	SlashCmdList.SELFFOUND("")
+	for i = 1, 4 do SF.UI.SelectTab(i) end
+	check(#W.errors == 0, "clean preview UI runs", W.errors[1])
+	SlashCmdList.SELFFOUND("preview clean")
+	check(SF.preview == nil and SF.GetStatus() == "DISQUALIFIED", "clean preview toggles off")
+
 	SelfFoundCharDB.run.violations = {}   -- /run SelfFoundCharDB.run.violations = {}
 	SelfFoundCharDB.run.gaps = {}
 	SelfFoundCharDB.log = {}

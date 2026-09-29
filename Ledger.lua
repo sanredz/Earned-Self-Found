@@ -321,10 +321,16 @@ end
 
 -- Returns status ("CLEAN" / "UNVERIFIED" / "DISQUALIFIED"), a one-line
 -- reason, and a short code used in witness heartbeats.
-function SF.GetStatus()
+-- `real` = true for anything shared or exported (heartbeats, reports): it
+-- ignores /sf preview's display-only samples.
+function SF.GetStatus(real)
 	local run = SF.run
 	if not run then
 		return "UNVERIFIED", "Loading...", "U"
+	end
+	-- TEMPORARY (screenshot helper, remove before release): /sf preview clean
+	if not real and SF.preview and SF.preview.clean then
+		return "CLEAN", "No trades, auctions, or player mail, and all play time accounted for.", "C"
 	end
 	if #run.violations > 0 then
 		local first = run.violations[1]

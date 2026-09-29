@@ -36,7 +36,7 @@ end
 -- ignore extra ones.
 local function HeartbeatBody()
 	local run = SF.run
-	local _, _, code = SF.GetStatus()
+	local _, _, code = SF.GetStatus(true)
 	local tier, pct, _, disputes = SF.WitnessRating(true)
 	local played = math.floor(SF.PlayedNow())
 	return table.concat({
@@ -402,6 +402,10 @@ end
 -- `real` = true for anything shared or exported (heartbeats, reports): it
 -- ignores /sf preview's sample data, which is display-only.
 function SF.WitnessRating(real)
+	-- TEMPORARY (screenshot helper, remove before release): /sf preview clean
+	if not real and SF.preview and SF.preview.clean then
+		return 3, 92, 7, 0
+	end
 	local pct = SF.WitnessCoverage()
 	local witnesses = 0
 	for _ in pairs(SF.run.witnessedBy) do
@@ -416,7 +420,7 @@ function SF.WitnessRating(real)
 	end
 	local disputes = SF.DisputeCount()
 	if not real and SF.preview then
-		disputes = disputes + SF.preview.disputes
+		disputes = disputes + (SF.preview.disputes or 0)
 	end
 	return tier, pct, witnesses, disputes
 end
@@ -519,7 +523,7 @@ end
 
 function SF.BuildReport()
 	local run = SF.run
-	local status, reason = SF.GetStatus()
+	local status, reason = SF.GetStatus(true)
 	local rating, witnessedPct, _, disputes = SF.WitnessRating(true)
 	local witnesses = {}
 	for i, w in ipairs(SF.WitnessList()) do

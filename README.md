@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sanredz/Earned-Self-Found/actions/workflows/ci.yml/badge.svg)](https://github.com/sanredz/Earned-Self-Found/actions/workflows/ci.yml)
 
-A **Solo Self Found (SSF)** tracker for **World of Warcraft: Forever**. Everything
+A **self-found** tracker for **World of Warcraft: Forever**. Everything
 your character owns, it earned: no trading, no auction house, no mail from
 other players. The addon enforces the rules, keeps a detailed ledger of your
 run, and lets other players vouch for it.

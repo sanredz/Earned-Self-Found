@@ -432,8 +432,7 @@ local function RefreshOverview(page)
 	}
 	t.mail.value:SetText(Number(stats.mailFromPlayers))
 	t.mail.tip = { "Items or gold taken from mail another player sent.", string.format("Mail sent: %d", stats.mailSent) }
-	local witnesses = SF.WitnessList()
-	t.witnesses.value:SetText(Number(#witnesses))
+	t.witnesses.value:SetText(Number(witnessCount))
 	t.witnesses.tip = {
 		"Other players running " .. SF.NAME .. " whose addon recorded your progress.",
 		string.format("%d%% of your play time was witnessed.", pct),
@@ -1129,6 +1128,12 @@ SlashCmdList.SELFFOUND = function(msg)
 	elseif msg == "broadcast" then
 		SF.Broadcast(true)
 		SF.Print("Sent your progress to guild and group members running " .. SF.NAME .. ".")
+	elseif msg == "preview clean" then
+		-- TEMPORARY screenshot helper (remove before release): shows CLEAN and
+		-- Heavily witnessed in the UI only; heartbeats/reports stay real.
+		SF.preview = not (SF.preview and SF.preview.clean) and { clean = true } or nil
+		SF.Print(SF.preview and "Clean preview on (display only). Type /sf preview clean again or /reload to turn it off." or "Preview off.")
+		SF.Fire("StatusChanged")
 	elseif msg == "preview" then
 		-- Display-only samples (for screenshots/testing): never saved, never
 		-- sent to other players, gone after /reload.

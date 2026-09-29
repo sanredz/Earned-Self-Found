@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Earned: Self Found
-## Notes: Solo Self Found (SSF) tracker. Enforces a self-found run: no trading, auction house, or player mail. Tamper-evident log, detailed gold ledger, and witness verification between players.
+## Notes: Self-found tracker. Enforces a self-found run: no trading, auction house, or player mail. Tamper-evident log, detailed gold ledger, and witness verification between players.
 ## Author: sanredz
 ## Version: @project-version@
 ## X-Website: https://github.com/sanredz/Earned-Self-Found
