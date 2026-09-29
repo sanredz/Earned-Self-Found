@@ -1,0 +1,16 @@
+# Packaging config for the BigWigs packager (used by .github/workflows/release.yml).
+# The zip contains a single "SelfFound" folder - the name WoW and existing saved
+# data expect. Do not change package-as.
+package-as: SelfFound
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - tests
+  - scripts
+  - node_modules
+  - package.json
+  - package-lock.json
+  - README.md

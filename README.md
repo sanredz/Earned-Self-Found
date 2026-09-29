@@ -1,1 +1,155 @@
-# Earned-Self-Found
+# Earned: Self Found
+
+[![CI](https://github.com/sanredz/Earned-Self-Found/actions/workflows/ci.yml/badge.svg)](https://github.com/sanredz/Earned-Self-Found/actions/workflows/ci.yml)
+
+A **Solo Self Found (SSF)** tracker for **World of Warcraft: Forever**. Everything
+your character owns, it earned: no trading, no auction house, no mail from
+other players. The addon enforces the rules, keeps a detailed ledger of your
+run, and lets other players vouch for it.
+
+> **Official download:** this repository's
+> [Releases](https://github.com/sanredz/Earned-Self-Found/releases). Copies
+> uploaded anywhere else aren't official and may be modified.
+
+## Features
+
+- **Run status:** CLEAN, UNVERIFIED or DISQUALIFIED, shown in the window, on
+  the minimap button, and in player tooltips.
+- **Rule enforcement:** breaking a rule disqualifies the run immediately, with
+  an on-screen alert. A warning banner appears whenever a trade, auction, mail
+  or bank window is open.
+- **Gold ledger:** income by source (looted gold, quests, vendor sales, mail
+  and auctions) and spending by category (vendors, repairs, training, flights,
+  fees).
+- **Net worth:** gold plus the vendor value of your bags, equipped gear and
+  bank, with your all-time peak.
+- **Stats:** deaths, kills, quests, items looted, sold and destroyed, trades,
+  auction house visits.
+- **Event log:** a checksum-chained history of your run.
+- **Witnesses:** players running the addon in your guild or group
+  automatically record each other's progress.
+- **Share and verify:** export a report anyone can paste into Verify, which
+  checks it against their own witness records.
+
+## Rules
+
+**Disqualifies the run:**
+- Completing a trade where any item, gold or enchant changes hands (opening
+  or cancelling a trade is fine).
+- Bidding on, buying out or listing an auction.
+- Taking items or gold (including COD) from mail sent by another player. Your
+  own returned mail, NPC mail and auction house mail are fine.
+- Withdrawing items or gold from a guild bank or Warband bank.
+- Editing the addon's saved data outside the game.
+
+**Marks the run Unverified:**
+- Play time the addon didn't see (it was disabled or uninstalled, or the game
+  crashed). It's checked against the server's `/played`.
+- Installing the addon on a character that already had play time.
+
+Grouping is allowed.
+
+## Install
+
+1. Download the latest `SelfFound-vX.Y.Z.zip` from
+   [Releases](https://github.com/sanredz/Earned-Self-Found/releases).
+2. Extract it into `World of Warcraft\_classic_beta_\Interface\AddOns\`. You
+   should end up with an `AddOns\SelfFound` folder.
+3. Install it **before** you start the character. A run that starts later is
+   marked Unverified.
+
+## Commands
+
+| Command | |
+|---|---|
+| `/sf` | Open or close the window |
+| `/sf status` | Print your run status |
+| `/sf share` | Export your report |
+| `/sf verify` | Verify someone else's report |
+| `/sf minimap` | Show or hide the minimap button |
+| `/sf broadcast` | Send your status to guild and group now |
+
+## How trustworthy is it?
+
+No addon can be made cheat-proof. Addons can't reach the internet, and
+their code and saved data sit on the player's computer. Earned makes cheating
+**detectable** and **costly**:
+
+- The event log is hash-chained and all saved data is sealed. Editing the file
+  by hand is detected and disqualifies the run.
+- Your status is sent to witnesses about a second after a violation. Those
+  records live on *their* computers, so deleting or editing your own data
+  doesn't erase what they saw.
+- Play time is compared against the server's `/played`, so time played with
+  the addon disabled shows up.
+
+A player who modifies the addon itself can still lie. The more witnesses a run
+has, the harder that is to hide.
+
+## Development
+
+```
+SelfFound.toc        Addon manifest (load order, saved variables)
+Core.lua             Namespace, events, formatting, serializer and checksum
+Ledger.lua           Saved run data, the chained log, seal and run status
+Tracker.lua          Gold, items, kills, quests, deaths, play time, net worth
+Rules.lua            Disqualification rules, alerts and warning banners
+Witness.lua          Heartbeats between players, reports and verification
+UI.lua               Main window, dialogs, slash commands
+Minimap.lua          Minimap button
+tests/               Test harness (Lua VM in Node with stubbed WoW APIs)
+scripts/             Dev helpers
+```
+
+**Setup (once):**
+
+```bash
+npm install
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\link-addon.ps1
+```
+
+The script links `Interface\AddOns\SelfFound` to this repo. Edit files here,
+then `/reload` in game.
+
+**Tests:** `npm test` runs a Lua 5.1 syntax check and a simulation of the
+addon against stubbed WoW APIs, covering:
+- the checksum against an independent reference
+- tamper detection, `/played` gaps and every rule
+- witnesses and reports
+- every UI code path
+
+CI runs the same tests on every push.
+
+**Compatibility, don't break these:**
+- the folder, TOC and saved variable names (`SelfFound`, `SelfFoundDB`,
+  `SelfFoundCharDB`)
+- the addon message prefix `SelfFound` and the `H1`/`A1` heartbeat format
+- the report format (`SF1:`)
+- anything that feeds the seal or log hashes
+
+Changing them breaks existing runs or stops versions from witnessing each
+other. If one must change, bump the MAJOR version and migrate.
+
+### Releasing
+
+1. Move the items under **Unreleased** in `CHANGELOG.md` to a new version
+   heading.
+2. Commit, then tag and push:
+   ```bash
+   git tag v1.1.0
+   git push origin main --tags
+   ```
+3. GitHub Actions runs the tests, stamps the version into the TOC, and
+   publishes `SelfFound-v1.1.0.zip` as a GitHub release.
+
+To also publish to CurseForge or Wago:
+1. Add `## X-Curse-Project-ID:` / `## X-Wago-ID:` to the TOC.
+2. Add the `CF_API_KEY` / `WAGO_API_TOKEN` repository secrets.
+
+## License
+
+All rights reserved. Free to download and use; redistribution and modified
+re-uploads aren't allowed. See [LICENSE](LICENSE).

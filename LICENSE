@@ -1,0 +1,39 @@
+Earned: Self Found
+Copyright (c) 2026 sanredz. All rights reserved.
+
+Earned: Self Found (the "Software") is free to download and use, but it is not
+open source. The following terms apply.
+
+You MAY:
+  - Download the Software from an official source (listed below) and use it
+    to play World of Warcraft.
+  - Read the source code and modify your own copy for private, personal use.
+  - Propose changes to the official repository (issues and pull requests).
+  - Fork the repository on GitHub, as permitted by GitHub's Terms of Service,
+    for the purpose of viewing it and proposing changes.
+
+You MAY NOT, without prior written permission from the copyright holder:
+  - Redistribute the Software, in original or modified form, in whole or in
+    part - including uploading it to CurseForge, Wago, WoWInterface, or any
+    other addon site, pack, or compilation.
+  - Publish or distribute a modified version under this or any other name.
+  - Present any copy or modification as official, or use the name
+    "Earned: Self Found" or its branding for another project.
+
+Official sources:
+  - https://github.com/sanredz/Earned-Self-Found
+  - Any addon-site listing linked from that repository's README.
+
+Contributions: by submitting a pull request or other contribution to the
+official repository, you agree that it may be included in and distributed
+with the Software under these terms.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+World of Warcraft is a trademark of Blizzard Entertainment, Inc. This project
+is not affiliated with or endorsed by Blizzard Entertainment.

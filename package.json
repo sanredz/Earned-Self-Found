@@ -1,0 +1,13 @@
+{
+  "name": "earned-self-found",
+  "private": true,
+  "description": "Dev tooling for the Earned: Self Found WoW addon (tests only; not part of the addon).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node tests/check.js && node tests/run.js"
+  },
+  "devDependencies": {
+    "fengari": "^0.1.4",
+    "luaparse": "^0.3.1"
+  }
+}

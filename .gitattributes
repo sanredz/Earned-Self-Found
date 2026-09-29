@@ -1,0 +1,7 @@
+# Normalize text files to LF in the repo; WoW reads either line ending.
+* text=auto eol=lf
+
+*.png binary
+*.tga binary
+*.blp binary
+*.jpg binary

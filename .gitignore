@@ -1,0 +1,14 @@
+# Dev dependencies (npm test)
+node_modules/
+
+# Local packager output and release zips
+.release/
+*.zip
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/
+.idea/

@@ -1,0 +1,21 @@
+## Interface: 16001
+## Title: Earned: Self Found
+## Notes: Solo Self Found (SSF) tracker. Enforces a self-found run: no trading, auction house, or player mail. Tamper-evident log, detailed gold ledger, and witness verification between players.
+## Author: sanredz
+## Version: @project-version@
+## X-Website: https://github.com/sanredz/Earned-Self-Found
+## X-License: All Rights Reserved
+## SavedVariables: SelfFoundDB
+## SavedVariablesPerCharacter: SelfFoundCharDB
+## IconTexture: Interface\Icons\INV_Shield_05
+## AddonCompartmentFunc: SelfFound_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: SelfFound_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: SelfFound_OnAddonCompartmentLeave
+
+Core.lua
+Ledger.lua
+Tracker.lua
+Rules.lua
+Witness.lua
+UI.lua
+Minimap.lua
