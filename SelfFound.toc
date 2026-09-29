@@ -5,6 +5,7 @@
 ## Version: @project-version@
 ## X-Website: https://github.com/sanredz/Earned-Self-Found
 ## X-License: All Rights Reserved
+## X-Curse-Project-ID: 1717650
 ## SavedVariables: SelfFoundDB
 ## SavedVariablesPerCharacter: SelfFoundCharDB
 ## IconTexture: Interface\Icons\INV_Shield_05
