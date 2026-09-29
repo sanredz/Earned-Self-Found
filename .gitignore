@@ -1,6 +1,7 @@
 # Private, local-only notes (maintainer + Claude context)
 CLAUDE.md
 docs/
+scripts/
 
 # Dev dependencies (npm test)
 node_modules/
