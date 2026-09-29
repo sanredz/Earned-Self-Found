@@ -89,6 +89,9 @@ end
 
 local function Send(message, channel, target)
 	if CanSend() then
+		if channel == "WHISPER" then
+			target = SF.WhisperTarget(target)
+		end
 		pcall(C_ChatInfo.SendAddonMessage, SF.PREFIX, message, channel, target)
 	end
 end

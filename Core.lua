@@ -238,6 +238,20 @@ function SF.UnitKey(unit)
 	return SF.FullName(name)
 end
 
+-- The name to whisper a player by. Our keys always carry a realm, but WoW:
+-- Forever rejects "Name Surname-Realm" as a whisper target (tested in game:
+-- "Name Surname" works), and a same-realm name never needs it.
+function SF.WhisperTarget(key)
+	if type(key) ~= "string" then
+		return key
+	end
+	local realm = "-" .. SF.RealmName()
+	if key:sub(-#realm) == realm then
+		return key:sub(1, -#realm - 1)
+	end
+	return key
+end
+
 function SF.PlayerKey()
 	return SF.UnitKey("player")
 end

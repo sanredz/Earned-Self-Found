@@ -226,7 +226,14 @@ local function InstallStubs()
 	_G.IsInRaid = function() return false end
 	_G.IsInGroup = function() return false end
 	_G.C_ChatInfo = {
-		SendAddonMessage = function(prefix, msg, channel, target) table.insert(W.sent, { prefix, msg, channel, target }) end,
+		SendAddonMessage = function(prefix, msg, channel, target)
+			-- Like WoW: Forever, which rejects "Name Surname-OurRealm" as a whisper target.
+			if channel == "WHISPER" and type(target) == "string" and target:find("-TestRealm", 1, true) then
+				table.insert(W.errors, "whisper target with our realm: " .. target)
+				return
+			end
+			table.insert(W.sent, { prefix, msg, channel, target })
+		end,
 		RegisterAddonMessagePrefix = function() return true end,
 		InChatMessagingLockdown = function() return W.lockdown == true end,
 	}
@@ -534,7 +541,7 @@ Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|5|4000|1|0|0|0|abcd1234|WARRIOR|3", "G
 local rec = SelfFoundDB.witness["Bob-TestRealm"]
 check(rec and rec.latest and rec.latest.lvl == 5, "heartbeat recorded")
 local acked = false
-for _, s in ipairs(W.sent) do if s[3] == "WHISPER" and s[4] == "Bob-TestRealm" and s[2]:match("^A1|C|") then acked = true end end
+for _, s in ipairs(W.sent) do if s[3] == "WHISPER" and s[4] == "Bob" and s[2]:match("^A1|C|") then acked = true end end
 check(acked, "ack whispered back")
 Fire("CHAT_MSG_ADDON", "SelfFound", "A1|C|5|4000|1|0|0|0|abcd1234|WARRIOR|3", "WHISPER", "Bob")
 check(run.witnessedBy["Bob-TestRealm"] and run.witnessedBy["Bob-TestRealm"].n == 1, "ack makes Bob our witness")
@@ -762,7 +769,7 @@ do
 
 	W.sent = {}
 	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|4000|5090", "GUILD", "Dana")
-	check(#W.sent == 1 and W.sent[1][3] == "WHISPER" and W.sent[1][4] == "Dana-TestRealm" and W.sent[1][2]:match("^C1|4000|5060|C|") and W.sent[1][2]:match("|tk5060$"),
+	check(#W.sent == 1 and W.sent[1][3] == "WHISPER" and W.sent[1][4] == "Dana" and W.sent[1][2]:match("^C1|4000|5060|C|") and W.sent[1][2]:match("|tk5060$"),
 		"recall answered with last sighting in range, echoing its token", W.sent[1] and W.sent[1][2])
 	W.sent = {}
 	Fire("CHAT_MSG_ADDON", "SelfFound", "R1|4000|5090", "GUILD", "Dana")
@@ -984,7 +991,7 @@ do
 		if m[2]:match("^W1|Hal") then w1 = m end
 		if m[2]:match("^V1|Hal") then v1 = m end
 	end
-	check(w1 and v1 and v1[2] == "V1|Hal-TestRealm|2-3,7" and v1[4] == "Jo-TestRealm", "answer carries the witnessed hours", v1 and v1[2])
+	check(w1 and v1 and v1[2] == "V1|Hal-TestRealm|2-3,7" and v1[4] == "Jo", "answer carries the witnessed hours", v1 and v1[2])
 
 	-- Asking: combine everyone's hours into the Witness Record
 	for _, n in ipairs({ "Kim", "Lu", "Mo", "Ned", "Pat" }) do Beat(n, 100) end
@@ -1078,7 +1085,7 @@ do
 	Beat("Hal", 7 * H + 90, 11, 1)
 	local told = {}
 	for _, m in ipairs(W.sent) do if m[2]:match("^M1|") then told[#told + 1] = m[2] .. ">" .. m[4] end end
-	check(table.concat(told, " ") == "M1|L|11>Hal-TestRealm M1|D|1>Hal-TestRealm", "we tell players we witnessed their level-up and death", table.concat(told, " "))
+	check(table.concat(told, " ") == "M1|L|11>Hal M1|D|1>Hal", "we tell players we witnessed their level-up and death", table.concat(told, " "))
 	SlashCmdList.SELFFOUND("")
 	SF.UI.SelectTab(3)
 	check(#W.errors == 0, "log with witnessed milestones renders", W.errors[1])
@@ -1661,7 +1668,7 @@ do
 	Advance(3) -- replies are spread over a couple of seconds
 	local reply
 	for _, m in ipairs(W.sent) do if m[2]:match("^W1|") then reply = m end end
-	check(reply and reply[3] == "WHISPER" and reply[4] == "Carl-TestRealm" and reply[2]:match("^W1|Gus%-TestRealm|%d+|"), "answers a question about a player we witnessed", reply and reply[2])
+	check(reply and reply[3] == "WHISPER" and reply[4] == "Carl" and reply[2]:match("^W1|Gus%-TestRealm|%d+|"), "answers a question about a player we witnessed", reply and reply[2])
 	local fields = {}
 	for f in ((reply and reply[2] or "") .. "|"):gmatch("(.-)|") do fields[#fields + 1] = f end
 	check(tonumber(fields[11]) and tonumber(fields[11]) >= 2 and tonumber(fields[12]) > 0, "reply includes the silent periods", reply and reply[2])
@@ -1791,6 +1798,10 @@ do
 	local body = mine:gsub("^H1|", "")
 	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|5|4000|1|0|0|0|abcd1234|WARRIOR|3", "GUILD", "Bob Stone-TestRealm")
 	check(SF.db.witness["Bob Stone-TestRealm"] ~= nil, "other surnamed players are recorded", body)
+	local ackTo
+	for _, m in ipairs(W.sent) do if m[2]:match("^A1|") then ackTo = m[4] end end
+	check(ackTo == "Bob Stone", "whispers go to \"Name Surname\", without the realm (tested in game)", ackTo)
+	check(SF.WhisperTarget("Bob Stone-OtherRealm") == "Bob Stone-OtherRealm", "another realm's player keeps their realm")
 
 	-- Tooltip finds them by name + surname.
 	local lines = {}
