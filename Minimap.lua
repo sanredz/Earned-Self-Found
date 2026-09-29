@@ -53,8 +53,7 @@ local function ShowTooltip(self)
 	local color = SF.COLOR[status] or SF.COLOR.GRAY
 	GameTooltip:AddLine(status, color[1], color[2], color[3])
 	if SF.run then
-		local tier, _, _, disputes = SF.WitnessRating()
-		GameTooltip:AddLine(SF.RatingText(tier, disputes))
+		GameTooltip:AddLine(string.format("Witnessed by %d players", SF.WitnessCount()), 0.7, 0.7, 0.7)
 	end
 	GameTooltip:AddLine(reason, 0.85, 0.85, 0.85, true)
 	if SF.run then

@@ -683,15 +683,7 @@ do
 	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|C|0|0|0|%s", gap.from, gap.to - 30, SF.Token(gap.to - 30, "C", 0)), "GUILD", "Bob")
 	check(not gap.cov, "sightings only accepted as whispers")
 
-	-- A witness proving our addon broadcast a DQ before the crash (valid
-	-- token): recorded under their name as a dispute, not enforced
-	Cover(gap.to - 30, "D", 1, "Carl")
-	check(not gap.cov and SF.GetStatus() == "UNVERIFIED" and #SF.run.violations == 0, "proven DQ sighting blocks recovery, doesn't disqualify")
-	check(gap.seen["Carl-TestRealm"] and gap.seen["Carl-TestRealm"].s == "D", "the claim is recorded under the witness's name")
-	check(SF.LogCount() == logBefore, "witness claims never go into your log")
-	local _, dispute = SF.GapWitnesses(gap)
-	check(#dispute == 1 and dispute[1] == "Carl-TestRealm", "claim counted as a dispute")
-	check(select(4, SF.WitnessRating()) == 1 and SF.RatingText(0, 1):find("(1 disputed)", 1, true), "dispute shown beside the witness rating")
+	-- (A token-proven DQ sighting is tested in section 9: it's a real DQ.)
 
 	Cover(gap.to - 30)
 	check(gap.cov == gap.to - 30 and gap.by == "Bob-TestRealm", "valid sighting recovers the gap")
@@ -705,7 +697,7 @@ do
 	check(SF.LogCount() == logBefore + 1, "extra confirmations don't add log entries")
 	local notes = select(2, SF.VerifyReport(SF.BuildReport()))
 	local noted = table.concat(notes, " | ")
-	check(noted:find("confirmed by 2 witnesses", 1, true) and noted:find("1 witness claims a violation", 1, true), "Verify shows confirmations and claims", noted)
+	check(noted:find("confirmed by 2 witnesses", 1, true) ~= nil, "Verify shows the confirmations", noted)
 	check(SF.GetStatus() == "CLEAN", "recovered crash => CLEAN", select(2, SF.GetStatus()))
 	check(select(2, SF.GetStatus()):find("1 crash recovered", 1, true) ~= nil, "CLEAN reason mentions the recovered crash")
 	check(SF.cdb.log[#SF.cdb.log].k == "recover", "recovery logged")
@@ -713,7 +705,7 @@ do
 	local r = SF.BuildReport()
 	check(r.gapTotal == gap.s and r.gapOpen == 0, "report carries raw and open gap totals")
 	local summary = SF.ReportSummary(r)
-	check(summary:find("recovered, confirmed by 2 witnesses", 1, true) ~= nil and summary:find("1 witness claims a violation", 1, true) ~= nil, "report summary shows recovery and claims", summary)
+	check(summary:find("recovered, confirmed by 2 witnesses", 1, true) ~= nil, "report summary shows the recovery", summary)
 
 	W.sent = {}
 	Advance(130)
@@ -737,7 +729,7 @@ check(beats >= 1, "heartbeat at least every 60s", beats)
 -- Witness side: answering someone else's recall
 do
 	local function Beat(who, pl, sid)
-		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|C|10|%d|0|0|0|0|abcd1234|MAGE|5%s", pl, sid and ("|" .. sid .. "|1.0.0|1|20|0|tk" .. pl) or ""), "GUILD", who)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|C|10|%d|0|0|0|0|abcd1234|MAGE|5%s", pl, sid and ("|" .. sid .. "|1.0.0|tk" .. pl) or ""), "GUILD", who)
 	end
 	Beat("Dana", 5000, 100)
 	Advance(60); Beat("Dana", 5060, 100)
@@ -939,121 +931,177 @@ Boot(trimmed, { played = ServerPlayed() })
 check(SF.integrity.ok, "trimmed log verifies after reload")
 
 -- ---------------------------------------------------------------------------
--- 9. Witness rating
+-- 9. Witness Record (witnessed hours), lost DQ, milestones, preview
 -- ---------------------------------------------------------------------------
 
 Fresh()
 do
-	local function Body(rt, wp, dp)
-		return string.format("C|5|100|0|0|0|0|abcd1234|MAGE|0|1|1.0.0%s", rt and string.format("|%d|%d|%d", rt, wp, dp) or "")
+	local function Beat(who, pl, lvl, d, s)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("H1|%s|%d|%d|%d|0|0|0|abcd1234|MAGE|0|7|1.0.0|tk", s or "C", lvl or 10, pl, d or 0), "GUILD", who)
 	end
-	local function Known(name, ...) Fire("CHAT_MSG_ADDON", "SelfFound", "H1|" .. Body(...), "GUILD", name) end
-	local function Ack(name) Fire("CHAT_MSG_ADDON", "SelfFound", "A1|" .. Body(), "WHISPER", name) end
+	local H = 3600
 
-	local tier, pct = SF.WitnessRating()
-	check(tier == 0 and pct == 0, "new run is Unwitnessed")
+	-- Witness side: the hours of their /played we heard them in, as ranges
+	Beat("Hal", 2 * H + 10)
+	Beat("Hal", 2 * H + 70)
+	Beat("Hal", 3 * H + 5)
+	Beat("Hal", 7 * H + 5)
+	local hal = SelfFoundDB.witness["Hal-TestRealm"]
+	check(#hal.hours == 2 and hal.hours[1][1] == 2 and hal.hours[1][2] == 3 and hal.hours[2][1] == 7 and hal.hours[2][2] == 7, "witnessed hours stored as ranges")
+	check(SF.WitnessSummary(hal).hours == 3, "hours counted")
+	local u = SF.MergeSpans({ { { 0, 2 }, { 5, 6 } }, { { 2, 4 } }, { { 8, 8 } } })
+	check(#u == 2 and u[1][1] == 0 and u[1][2] == 6 and u[2][1] == 8 and SF.SpanHours(u) == 8, "ranges merge")
 
-	local names = { "Wa", "Wb", "Wc", "Wd", "We" }
-	for _, n in ipairs(names) do Known(n) end
-	for _ = 1, 8 do
-		for _, n in ipairs(names) do Ack(n) end
-		Advance(900)
-	end
-	tier, pct = SF.WitnessRating()
-	check(tier == 3 and pct >= 75, "fully witnessed by 5 players => Heavily witnessed", tier .. " " .. pct)
-
-	Ack("Stranger")
-	check(select(3, SF.WitnessRating()) == 5, "strangers can't count as witnesses")
-
-	Advance(900 * 8) -- solo play
-	tier, pct = SF.WitnessRating()
-	check(tier == 2 and pct >= 40 and pct < 75, "half witnessed => Well witnessed", tier .. " " .. pct)
-	Advance(900 * 14)
-	tier, pct = SF.WitnessRating()
-	check(tier == 1 and pct >= 10 and pct < 40, "mostly solo => Lightly witnessed", tier .. " " .. pct)
-
-	-- Heartbeats carry tier, witnessed %, disputes (fields 13-15)
+	-- Answering: summary + the hours
+	Beat("Jo", 100)
 	W.sent = {}
-	SF.Broadcast(true)
-	local fields
-	for _, s in ipairs(W.sent) do
-		if s[2]:match("^H1|") then fields = {} for f in (s[2] .. "|"):gmatch("(.-)|") do fields[#fields + 1] = f end end
+	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Hal-TestRealm", "GUILD", "Jo")
+	Advance(3)
+	local w1, v1
+	for _, m in ipairs(W.sent) do
+		if m[2]:match("^W1|Hal") then w1 = m end
+		if m[2]:match("^V1|Hal") then v1 = m end
 	end
-	check(fields and tonumber(fields[14]) == tier and tonumber(fields[15]) == pct and tonumber(fields[16]) == 0, "heartbeat carries the rating", fields and table.concat(fields, ","))
+	check(w1 and v1 and v1[2] == "V1|Hal-TestRealm|2-3,7" and v1[4] == "Jo-TestRealm", "answer carries the witnessed hours", v1 and v1[2])
 
-	-- Other players' ratings: recorded and shown in tooltips
-	Known("Rated", 2, 55, 1)
-	local rec = SelfFoundDB.witness["Rated-TestRealm"]
-	check(rec.latest.rt == 2 and rec.latest.wp == 55 and rec.latest.dp == 1, "others' rating recorded")
-	local lines = {}
-	local tip = NewMock("GameTooltip")
-	tip.GetUnit = function() return "Rated", "mouseover" end
-	tip.AddLine = function(_, text) lines[#lines + 1] = text end
-	local realTooltip, realUnitName = _G.GameTooltip, _G.UnitName
-	_G.GameTooltip = tip
-	_G.UnitName = function(u) if u == "player" then return "Tester" end return "Rated" end
-	W.tooltipPost(tip)
-	_G.GameTooltip, _G.UnitName = realTooltip, realUnitName
-	check(#lines == 3 and lines[1]:find("CLEAN", 1, true) and lines[1]:find("level 5", 1, true) and lines[2] == "Well witnessed" and lines[3] == "1 dispute",
-		"tooltip: status, rating and disputes on separate lines", table.concat(lines, " / "))
-
-	-- Own tooltip, no disputes: two lines
-	lines = {}
-	tip.GetUnit = function() return "Tester", "player" end
-	_G.GameTooltip = tip
-	W.tooltipPost(tip)
-	_G.GameTooltip = realTooltip
-	check(#lines == 2 and lines[2] == "Lightly witnessed", "own tooltip: status and rating, no dispute line", table.concat(lines, " / "))
-
-	-- Reports and Verify
-	local r = SF.BuildReport()
-	check(r.rating == tier and r.witnessedPct == pct and r.disputes == 0, "report carries the rating")
-	check(SF.ReportSummary(r):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "report summary shows the rating")
-	check(table.concat(select(2, SF.VerifyReport(r)), " "):find("Witness rating: Lightly witnessed", 1, true) ~= nil, "Verify shows the rating")
-
-	-- /sf preview: display-only sample dispute + alert, never shared or saved
-	local sealBefore = SF.cdb.seal
-	SlashCmdList.SELFFOUND("preview")
-	check(select(4, SF.WitnessRating()) == 1, "preview shows a sample dispute")
-	check(select(4, SF.WitnessRating(true)) == 0 and SF.BuildReport().disputes == 0, "preview dispute never reaches reports")
-	W.sent = {}
-	SF.Broadcast(true)
-	local previewLeak = false
-	for _, s in ipairs(W.sent) do
-		if s[2]:match("^H1|") then
-			local f = {}
-			for x in (s[2] .. "|"):gmatch("(.-)|") do f[#f + 1] = x end
-			if f[16] ~= "0" then previewLeak = true end -- body field 15 = disputes
+	-- Asking: combine everyone's hours into the Witness Record
+	for _, n in ipairs({ "Kim", "Lu", "Mo", "Ned", "Pat" }) do Beat(n, 100) end
+	check(SF.AskWitnesses("Hal-TestRealm"), "asked")
+	local function Reply(from, n, pl, spans, sawD, silentN)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("W1|Hal-TestRealm|%d|%d|%d|C|10|%d|%d|%d|%d|%d|%d|1.0.0",
+			n, time() - 9000, time() - 60, pl, sawD or 0, sawD or 0, silentN or 0, (silentN or 0) * 600, silentN and time() - 100 or 0), "WHISPER", from)
+		if spans then
+			Fire("CHAT_MSG_ADDON", "SelfFound", "V1|Hal-TestRealm|" .. spans, "WHISPER", from)
 		end
 	end
-	check(not previewLeak, "preview dispute never sent in heartbeats")
-	check(SF.cdb.seal == sealBefore and SF.GetStatus() ~= "DISQUALIFIED" and #SF.run.violations == 0, "preview changes no saved data")
-	check(SelfFoundAlert and SelfFoundAlert:IsShown(), "preview shows the DQ alert")
-	SlashCmdList.SELFFOUND("preview")
-	check(SF.preview == nil and select(4, SF.WitnessRating()) == 0, "preview toggles off")
+	Reply("Jo", 600, 10 * H + 5, "0-9")
+	Reply("Kim", 300, 10 * H, "0-4")
+	Reply("Lu", 200, 10 * H, "8-10")
+	local rec = SF.Profile("Hal-TestRealm").record
+	check(rec.total == 11 and rec.covered == 11 and rec.pct == 100 and rec.contributors == 4, "hours combined across witnesses", rec.covered .. "/" .. rec.total .. " by " .. rec.contributors)
+	check(rec.verdict == "well" and rec.label == "Well witnessed" and #rec.flags == 0, "well witnessed, no flags", rec.label)
 
-	-- Sealed and persisted
-	local saved = Logout()
-	Boot(saved, { played = ServerPlayed() })
-	check(SF.integrity.ok and SF.run.coverage.n == 8, "coverage survives a reload", SF.run.coverage.n)
+	-- Implausible claims and forged hours don't count
+	Reply("Mo", 2, 10 * H, "0-50")        -- claims 51 hours from 2 heartbeats
+	check(SF.Profile("Hal-TestRealm").record.contributors == 4, "a witness can't claim more hours than it heard heartbeats")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "V1|Hal-TestRealm|0-10", "WHISPER", "Stranger")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "V1|Hal-TestRealm|0-10", "WHISPER", "Hal")
+	check(SF.queries["Hal-TestRealm"].replies["Stranger-TestRealm"] == nil and SF.queries["Hal-TestRealm"].replies["Hal-TestRealm"] == nil, "hours from strangers or the player themselves ignored")
+	local kimHours = SF.SpanHours(SF.queries["Hal-TestRealm"].replies["Kim-TestRealm"].spans)
+	Fire("CHAT_MSG_ADDON", "SelfFound", "V1|Hal-TestRealm|5-10", "GUILD", "Kim")
+	check(SF.SpanHours(SF.queries["Hal-TestRealm"].replies["Kim-TestRealm"].spans) == kimHours, "hours only accepted as whispers")
 
-	-- UI paths with a rating present
-	SlashCmdList.SELFFOUND("")
-	for i = 1, 4 do SF.UI.SelectTab(i) end
-	SlashCmdList.SELFFOUND("status")
+	-- Ranges extend in both directions (compact storage)
+	Beat("Val", 5 * H)
+	Beat("Val", 4 * H)
+	Beat("Val", 6 * H)
+	local val = SelfFoundDB.witness["Val-TestRealm"].hours
+	check(#val == 1 and val[1][1] == 4 and val[1][2] == 6, "adjacent hours merge into one range")
+
+	-- Flags: shown with names, never subtracted
+	Reply("Ned", 100, 10 * H, nil, 1)
+	Reply("Pat", 100, 10 * H, nil, nil, 1)
+	rec = SF.Profile("Hal-TestRealm").record
+	local text = {}
+	for _, f in ipairs(rec.flags) do text[#text + 1] = f.who .. " " .. f.text end
+	check(#rec.flags == 2 and rec.verdict == "well", "flags listed, verdict unchanged", table.concat(text, "; "))
+	check(table.concat(text, "; "):find("Ned saw them disqualified", 1, true) and table.concat(text, "; "):find("Pat saw them online without Earned", 1, true), "flag texts name the witness")
+
+	-- One witness alone
+	Beat("Solo", 100)
+	for i = 1, 5 do Beat("Rex", i * H) end
+	rec = SF.Profile("Rex-TestRealm").record
+	check(rec.contributors == 1 and rec.verdict ~= "well" and rec.label:find("all from 1 player", 1, true), "one witness alone: never Well witnessed, and labelled", rec.label)
+	check(SF.Profile("Nobody-TestRealm").record.verdict == "none", "no records => not witnessed yet")
+
+	-- UI with a record: profile window, bar, all hovers
+	SF.UI.ShowProfile("Hal-TestRealm")
+	SF.UI.ShowProfile(SF.playerKey)
 	for _, m in ipairs(allMocks) do
 		if m.__scripts.OnEnter then m.__scripts.OnEnter(m) end
 	end
-	check(#W.errors == 0, "rating UI paths run without errors", W.errors[1])
+	check(#W.errors == 0, "Witness Record UI runs", W.errors[1])
 
-	-- One friend witnessing everything isn't enough for a high rating
-	Fresh()
-	Known("Buddy")
-	for _ = 1, 8 do Ack("Buddy"); Advance(900) end
-	tier, pct = SF.WitnessRating()
-	check(tier == 1 and pct >= 75, "fully witnessed by a single player => only Lightly witnessed", tier .. " " .. pct)
-	for _, n in ipairs({ "Pa", "Pb" }) do Known(n); Ack(n) end
-	check(SF.WitnessRating() == 2, "three witnesses => Well witnessed")
+	-- Tooltips: your own records of them
+	local lines = {}
+	local tip = NewMock("GameTooltip")
+	tip.GetUnit = function() return "Hal", "mouseover" end
+	tip.AddLine = function(_, t) lines[#lines + 1] = t end
+	local realTooltip, realUnitName = _G.GameTooltip, _G.UnitName
+	_G.GameTooltip = tip
+	_G.UnitName = function(unit) if unit == "player" then return "Tester" end return "Hal" end
+	W.tooltipPost(tip)
+	_G.GameTooltip, _G.UnitName = realTooltip, realUnitName
+	check(lines[2] and lines[2]:find("You witnessed 3h of their play", 1, true), "tooltip shows your witnessed hours", table.concat(lines, " / "))
+
+	-- Milestones: witnesses tell us they saw our level-up / death
+	W.level = 2
+	Fire("PLAYER_LEVEL_UP", 2)
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|L|2", "WHISPER", "Jo")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|L|2", "WHISPER", "Jo")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|L|2", "WHISPER", "Kim")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|L|5", "WHISPER", "Lu")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|L|2", "WHISPER", "Stranger")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|L|2", "GUILD", "Lu")
+	check(#(SF.run.milestones.L2 or {}) == 2 and SF.run.milestones.L5 == nil, "level-up witnessed by Jo and Kim (no duplicates, wrong level or strangers)")
+	local levelEntry
+	for _, e in ipairs(SF.cdb.log) do if e.key == "L2" then levelEntry = e end end
+	check(levelEntry ~= nil, "level-up log entry is linked to its witnesses")
+	Fire("PLAYER_DEAD")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "M1|D|" .. SF.run.stats.deaths, "WHISPER", "Jo")
+	check(#(SF.run.milestones["D" .. SF.run.stats.deaths] or {}) == 1, "death witnessed")
+	-- ...and we tell others when we see theirs
+	W.sent = {}
+	Beat("Hal", 7 * H + 60, 11)
+	Beat("Hal", 7 * H + 90, 11, 1)
+	local told = {}
+	for _, m in ipairs(W.sent) do if m[2]:match("^M1|") then told[#told + 1] = m[2] .. ">" .. m[4] end end
+	check(table.concat(told, " ") == "M1|L|11>Hal-TestRealm M1|D|1>Hal-TestRealm", "we tell players we witnessed their level-up and death", table.concat(told, " "))
+	SlashCmdList.SELFFOUND("")
+	SF.UI.SelectTab(3)
+	check(#W.errors == 0, "log with witnessed milestones renders", W.errors[1])
+
+	-- /sf preview: the DQ alert only; nothing saved or shared
+	local sealBefore = SF.cdb.seal
+	SlashCmdList.SELFFOUND("preview")
+	check(SelfFoundAlert and SelfFoundAlert:IsShown() and SF.cdb.seal == sealBefore and #SF.run.violations == 0, "preview shows the alert, changes nothing")
+	SlashCmdList.SELFFOUND("preview")
+
+	-- Reports: no self-reported rating any more
+	local r = SF.BuildReport()
+	check(r.rating == nil and r.witnessedPct == nil and r.disputes == nil, "reports carry no self-reported rating")
+
+	local saved = Logout()
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.integrity.ok and #SF.run.milestones.L2 == 2 and #SelfFoundDB.witness["Hal-TestRealm"].hours >= 1, "hours and milestones saved")
+end
+
+-- Lost disqualification: a witness echoes a token proving our addon
+-- broadcast a DQ before the game closed without saving => real DQ.
+Fresh()
+do
+	Advance(100)
+	local saved = Logout()
+	Advance(3600)
+	Boot(saved, { played = ServerPlayed() })
+	local gap = SF.run.gaps[1]
+	Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|12|5000|0|0|0|0|abcd1234|ROGUE|3|7|1.0.0|tk", "GUILD", "Carl")
+	local seen = gap.to - 30
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|D|1|0|0|%s", gap.from, seen, "deadbeef"), "WHISPER", "Carl")
+	check(#SF.run.violations == 0, "unproven DQ claim does nothing")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|D|1|0|0|%s", gap.from, seen, SF.Token(seen, "D", 1)), "WHISPER", "Carl")
+	check(SF.HasViolation("LOST") and SF.GetStatus() == "DISQUALIFIED" and #SF.run.violations == 1, "token-proven lost DQ becomes a real DQ")
+	-- The whole UI with gaps, sightings and violations present
+	SlashCmdList.SELFFOUND("")
+	for i = 1, 4 do SF.UI.SelectTab(i) end
+	SF.UI.ShowProfile(SF.playerKey)
+	for _, m in ipairs(allMocks) do
+		if m.__scripts.OnEnter then m.__scripts.OnEnter(m) end
+	end
+	check(#W.errors == 0, "UI runs with gaps, sightings and violations", W.errors[1])
+	check(not gap.cov, "and the gap isn't recovered by it")
+	Fire("CHAT_MSG_ADDON", "SelfFound", string.format("C1|%.0f|%.0f|D|1|0|0|%s", gap.from, seen, SF.Token(seen, "D", 1)), "WHISPER", "Carl")
+	check(#SF.run.violations == 1, "not counted twice")
 end
 
 -- ---------------------------------------------------------------------------
@@ -1214,7 +1262,7 @@ end
 Fresh()
 do
 	local function Beat(who)
-		Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|12|5000|0|0|0|0|abcd1234|ROGUE|3|7|1.0.0|1|30|0|tk", "GUILD", who)
+		Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|12|5000|0|0|0|0|abcd1234|ROGUE|3|7|1.0.0|tk", "GUILD", who)
 	end
 	local function Online(name, online)
 		for _, m in ipairs(W.roster) do
@@ -1277,17 +1325,22 @@ do
 	Beat("Carl")
 	W.sent = {}
 	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Gus-TestRealm", "GUILD", "Carl")
-	local reply = W.sent[1]
+	Advance(3) -- replies are spread over a couple of seconds
+	local reply
+	for _, m in ipairs(W.sent) do if m[2]:match("^W1|") then reply = m end end
 	check(reply and reply[3] == "WHISPER" and reply[4] == "Carl-TestRealm" and reply[2]:match("^W1|Gus%-TestRealm|%d+|"), "answers a question about a player we witnessed", reply and reply[2])
 	local fields = {}
 	for f in ((reply and reply[2] or "") .. "|"):gmatch("(.-)|") do fields[#fields + 1] = f end
 	check(tonumber(fields[11]) and tonumber(fields[11]) >= 2 and tonumber(fields[12]) > 0, "reply includes the silent periods", reply and reply[2])
 	W.sent = {}
 	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Gus-TestRealm", "GUILD", "Carl")
+	Advance(3)
 	check(#W.sent == 0, "repeat questions throttled")
 	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Nobody-TestRealm", "GUILD", "Dana")
+	Advance(3)
 	check(#W.sent == 0, "no answer without records")
 	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Gus-TestRealm", "WHISPER", "Dana")
+	Advance(3)
 	check(#W.sent == 0, "questions only accepted from guild/group channels")
 
 	-- Asking witnesses: our question and their replies
@@ -1305,7 +1358,7 @@ do
 	W1("Carl", "Else-TestRealm", "C", 0, 0)
 	W1("Dana", "Gus-TestRealm", "C", 0, 0, "GUILD")
 	local p = SF.Profile("Gus-TestRealm")
-	check(p.agree.total == 2 and p.agree.clean == 1 and p.agree.sawD == 1 and p.agree.silent == 1, "replies from known witnesses counted", p.agree.total)
+	check(#p.others == 2 and #p.record.flags == 3, "replies from known witnesses counted (Dana: DQ + no addon; you: no addon)", #p.record.flags)
 	check(p.others[1] and SF.queries["Gus-TestRealm"].replies["Stranger-TestRealm"] == nil, "strangers' replies ignored")
 	check(SF.queries["Gus-TestRealm"].replies["Gus-TestRealm"] == nil, "nobody vouches for themselves")
 	check(SF.queries["Else-TestRealm"] == nil, "replies to questions we never asked are ignored")

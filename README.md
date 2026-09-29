@@ -33,9 +33,11 @@ run, and lets other players vouch for it.
   can't quietly go dark. Only your status, level, played time, deaths, quest
   count, class and number of violations are shared, and only with guild and
   group members running the addon.
-- **Check any player:** search for a player (or click one) to see everything
-  your addon recorded of them, and ask every other witness in your guild and
-  group what theirs recorded.
+- **Check any player:** search for a player (or click one) to see their
+  **Witness Record**: how many of their played hours other people's addons
+  can account for, and any flags.
+- **Who was there:** your log shows which players witnessed your level-ups
+  and deaths.
 - **Online without Earned:** if someone who runs the addon is online but
   their addon goes quiet, witnesses notice and record it.
 - **Share and verify:** export a report anyone can paste into Verify, which
@@ -110,15 +112,40 @@ people.
 Open the **Witnesses** tab and type a name in the search box (suggestions
 appear as you type), click any player in the lists, or use `/sf check <name>`.
 The profile shows:
-- **What their addon says:** status and witness rating.
+- **What their addon says:** their status.
+- **Their Witness Record** (see below).
 - **What you've seen:** a timeline of every status you recorded, and any
   time they were online without Earned running.
 - **Other witnesses:** click **Ask witnesses**, and everyone in your guild
-  and group who runs Earned replies with what their addon recorded, e.g.
-  "5 of 5 last saw them CLEAN" or "1 saw a disqualification".
+  and group who runs Earned replies with what their addon recorded.
 
 A player can fake their own addon, but not what everyone else's recorded.
-Use **My profile** to see what others recorded of you.
+Use **My profile** to see your own record.
+
+### The Witness Record
+
+```
+Bartholomew        CLEAN (their addon's report)
+
+Witness record     Well witnessed · no flags
+[##########################--####]  36 of 42 played hours
+                   witnessed by 27 players
+```
+
+- **Witnessed hours.** Every witness remembers which hours of your
+  `/played` they heard your addon in. When someone asks, all answers are
+  combined into the bar: how much of your play time other people's addons
+  can account for. It fills up as you play with other Earned players.
+- **Flags.** Only things that don't fit a clean run, each with a name: a
+  witness saw you disqualified, or saw you online without Earned running.
+- **Verdict:** **Well witnessed** (75%+ of hours, from at least 3
+  witnesses), **Partly witnessed** (25%+), or **Barely witnessed**. It says
+  "(all from 1 player)" if only one witness backs it.
+
+It's always calculated by the person checking, from everyone else's
+records, never from what your own addon claims. So it can't be faked, and
+a big guild only helps if people were actually online while you played.
+Flags are shown, never subtracted: you judge them yourself.
 
 ### Online without Earned
 
@@ -138,21 +165,10 @@ witnesses heard from your addon every minute:
   **CLEAN**.
 - Each recovery lists the witnesses who confirmed it.
 
-### Witness rating
+### Who was there
 
-Next to your status you'll see how well other players can vouch for your
-run, e.g. **CLEAN · Well witnessed**:
-
-| Rating | Share of your play time witnessed | Different witnesses |
-|---|---|---|
-| Unwitnessed | less than 10% | |
-| Lightly witnessed | 10%+ | 1+ |
-| Well witnessed | 40%+ | 3+ |
-| Heavily witnessed | 75%+ | 5+ |
-
-If a witness ever proved you broadcast a disqualification before a crash,
-it shows next to the rating as "(1 disputed)". It's never enforced
-automatically.
+When a witness sees you level up or die, their addon tells yours. Your log
+shows it: *"Reached level 20, witnessed by 3"* (hover it for the names).
 
 ### Nobody can grief you
 
@@ -165,7 +181,12 @@ automatically.
   leaves your computer. Crash sightings must echo a real token, so nobody can
   make one up.
 - What witnesses tell you when you ask about a player is shown with their
-  names and counts ("4 of 5…"), as information, never as a verdict.
+  names, as information. A witness can't claim more hours than it actually
+  heard heartbeats for.
+- The one exception proves itself: if a witness echoes a token showing that
+  *your own addon* broadcast a disqualification before the game closed
+  without saving, that disqualification is restored. It's your addon's word,
+  not the witness's.
 
 ## Install
 
@@ -187,7 +208,7 @@ automatically.
 | `/sf check <name>` | Open a player's profile (just `/sf check` for your own) |
 | `/sf minimap` | Show or hide the minimap button |
 | `/sf broadcast` | Send your status to guild and group now |
-| `/sf preview` | Preview the disqualification alert and a sample dispute. Nothing is saved or shared; type it again or `/reload` to turn it off. |
+| `/sf preview` | Preview the disqualification alert. Nothing is saved or shared. |
 
 ## How trustworthy is it?
 
@@ -219,8 +240,8 @@ Core.lua             Namespace, events, formatting, serializer and checksum
 Ledger.lua           Saved run data, the chained log, seal and run status
 Tracker.lua          Gold, items, kills, quests, deaths, play time, net worth
 Rules.lua            Disqualification rules, alerts and warning banners
-Witness.lua          Heartbeats between players, crash recovery, rating, reports
-Profiles.lua         "Online without Earned" detection, asking other witnesses
+Witness.lua          Heartbeats between players, crash recovery, reports
+Profiles.lua         Witnessed hours, Witness Record, "online without Earned", milestones, asking witnesses
 UI.lua               Main window, dialogs, slash commands
 ProfileUI.lua        Player profile window
 Minimap.lua          Minimap button

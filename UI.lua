@@ -236,29 +236,16 @@ local function BuildOverview(page)
 	status.icon:SetPoint("LEFT", 20, 0)
 	status.word = Text(status, "GameFontNormalHuge")
 	status.word:SetPoint("TOPLEFT", status.icon, "TOPRIGHT", 16, -2)
-	status.rating = Text(status, "GameFontNormalLarge")
-	status.rating:SetPoint("BOTTOMLEFT", status.word, "BOTTOMRIGHT", 12, 2)
-	-- Hovering the banner explains the witness rating.
+	status.witnessed = Text(status, "GameFontDisable")
+	status.witnessed:SetPoint("BOTTOMLEFT", status.word, "BOTTOMRIGHT", 12, 3)
+	-- Hovering the banner explains status vs. witnesses.
 	status:EnableMouse(true)
 	status:SetScript("OnEnter", function(self)
-		local tier, pct, witnesses, disputes = SF.WitnessRating()
-		local lines = {
-			{ SF.RatingText(tier, disputes) },
-			string.format("%d%% of your play time was witnessed, by %d different player%s.", pct, witnesses, witnesses == 1 and "" or "s"),
+		Tooltip(self, "Status and witnesses", {
+			{ "Your status is decided only by your own actions, seen by your own addon.", 1, 1, 1 },
 			{ " " },
-			{ "The status is decided only by your own actions. The witness rating shows how well other players can vouch for it:", 0.8, 0.8, 0.8 },
-			{ "Lightly: 10% of play time witnessed, 1+ witness", 0.85, 0.85, 0.85 },
-			{ "Well: 40%, 3+ witnesses", 0.45, 0.75, 1 },
-			{ "Heavily: 75%, 5+ witnesses", 1, 0.82, 0 },
-		}
-		if disputes > 0 then
-			lines[#lines + 1] = { " " }
-			lines[#lines + 1] = { string.format("%d witness%s claimed a violation during untracked play time. Claims are shown to anyone verifying your report, but never change your status.",
-				disputes, disputes == 1 and "" or "es"), 1, 0.6, 0.2 }
-		end
-		lines[#lines + 1] = { " " }
-		lines[#lines + 1] = { "Play with guild or group members running " .. SF.NAME .. " to raise it.", 0.6, 0.6, 0.6 }
-		Tooltip(self, "Witness rating", lines)
+			{ string.format("Witnesses back it up: %d players' addons have recorded you. Open My profile (Witnesses tab) and ask them to see how many of your played hours they can account for.", SF.WitnessCount()), 0.8, 0.8, 0.8 },
+		})
 	end)
 	status:SetScript("OnLeave", HideTooltip)
 	status.reason = Text(status, "GameFontHighlight")
@@ -385,8 +372,8 @@ local function RefreshOverview(page)
 	s.bar:SetColorTexture(color[1], color[2], color[3], 0.9)
 	s.icon:SetTexture(STATUS_ICON[status])
 	s.word:SetText(SF.Colorize(status, color))
-	local tier, pct, witnessCount, disputes = SF.WitnessRating()
-	s.rating:SetText(SF.RatingText(tier, disputes))
+	local witnessCount = SF.WitnessCount()
+	s.witnessed:SetText(witnessCount > 0 and string.format("witnessed by %d player%s", witnessCount, witnessCount == 1 and "" or "s") or "")
 	s.reason:SetText(reason)
 	local className, classFile = UnitClass("player")
 	local raceName = UnitRace("player")
@@ -401,14 +388,10 @@ local function RefreshOverview(page)
 	t.played.value:SetText(SF.Duration(SF.PlayedNow()))
 	t.played.tip = { "Total play time on this character.", string.format("Untracked: %s", SF.Duration(SF.OpenGapTotal())) }
 	for _, g in ipairs(run.gaps) do
-		local support, dispute = SF.GapWitnesses(g)
 		if g.cov then
+			local support = SF.GapWitnesses(g)
 			table.insert(t.played.tip, { string.format("Crash %s: %s recovered, confirmed by %d witness%s", SF.Date(g.t), SF.Duration(g.s),
 				#support, #support == 1 and "" or "es"), 0.3, 0.92, 0.4 })
-		end
-		if #dispute > 0 then
-			table.insert(t.played.tip, { string.format("%d witness%s claim%s a violation during untracked time (%s)", #dispute,
-				#dispute == 1 and "" or "es", #dispute == 1 and "s" or "", SF.Date(g.t)), 1, 0.78, 0.1 })
 		end
 	end
 	t.deaths.value:SetText(Number(stats.deaths))
@@ -435,8 +418,7 @@ local function RefreshOverview(page)
 	t.witnesses.value:SetText(Number(witnessCount))
 	t.witnesses.tip = {
 		"Other players running " .. SF.NAME .. " whose addon recorded your progress.",
-		string.format("%d%% of your play time was witnessed.", pct),
-		"Rating: " .. SF.RatingText(tier, disputes),
+		{ "Open My profile in the Witnesses tab to see how many of your played hours they can account for.", 0.7, 0.7, 0.7 },
 	}
 
 	for _, tile in pairs(t) do
@@ -590,7 +572,17 @@ local function InitLogRow(row, e)
 		row:SetScript("OnEnter", function(self)
 			local entry = self.entry
 			if entry then
-				Tooltip(self, SF.Date(entry.t), { entry.m, { "Checksum " .. tostring(entry.h), 0.5, 0.5, 0.5 } })
+				local lines = { entry.m }
+				local seenBy = entry.key and SF.run.milestones[entry.key]
+				if seenBy and #seenBy > 0 then
+					local names = {}
+					for _, name in ipairs(seenBy) do
+						names[#names + 1] = SF.ShortName(name)
+					end
+					lines[#lines + 1] = { "Witnessed by " .. table.concat(names, ", "), 0.3, 0.92, 0.4 }
+				end
+				lines[#lines + 1] = { "Checksum " .. tostring(entry.h), 0.5, 0.5, 0.5 }
+				Tooltip(self, SF.Date(entry.t), lines)
 			end
 		end)
 		row:SetScript("OnLeave", HideTooltip)
@@ -599,7 +591,9 @@ local function InitLogRow(row, e)
 	row.time:SetText(date("%m/%d %H:%M", e.t))
 	row.icon:SetTexture(LOG_ICON[e.k] or ICON.fees)
 	local color = LOG_COLOR[e.k] or (e.x and SF.COLOR.GRAY) or SF.COLOR.WHITE
-	row.text:SetText(e.m)
+	-- "Who was there" for level-ups and deaths.
+	local seenBy = e.key and SF.run.milestones[e.key]
+	row.text:SetText(e.m .. (seenBy and #seenBy > 0 and string.format("  |cff4deb66witnessed by %d|r", #seenBy) or ""))
 	row.text:SetTextColor(color[1], color[2], color[3])
 end
 
@@ -643,17 +637,21 @@ local function InitWitnessedRow(row, data)
 		RowHighlight(row)
 		row.name = Text(row, "GameFontHighlight")
 		row.name:SetPoint("LEFT", 6, 0)
-		row.name:SetWidth(130)
+		row.name:SetWidth(110)
 		row.name:SetWordWrap(false)
 		row.status = Text(row, "GameFontHighlightSmall")
-		row.status:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
-		row.status:SetWidth(90)
+		row.status:SetPoint("LEFT", row.name, "RIGHT", 4, 0)
+		row.status:SetWidth(80)
 		row.level = Text(row, "GameFontHighlightSmall")
 		row.level:SetPoint("LEFT", row.status, "RIGHT", 4, 0)
-		row.level:SetWidth(45)
+		row.level:SetWidth(40)
+		row.hours = Text(row, "GameFontHighlightSmall")
+		row.hours:SetPoint("LEFT", row.level, "RIGHT", 4, 0)
+		row.hours:SetWidth(45)
 		row.flag = Text(row, "GameFontHighlightSmall")
-		row.flag:SetPoint("LEFT", row.level, "RIGHT", 4, 0)
-		row.flag:SetWidth(90)
+		row.flag:SetPoint("LEFT", row.hours, "RIGHT", 4, 0)
+		row.flag:SetWidth(75)
+		row.flag:SetWordWrap(false)
 		row.flag:SetTextColor(1, 0.6, 0.2)
 		row.seen = Text(row, "GameFontDisableSmall", "RIGHT")
 		row.seen:SetPoint("RIGHT", -6, 0)
@@ -669,8 +667,8 @@ local function InitWitnessedRow(row, data)
 			end
 			local l = d.rec.latest or {}
 			Tooltip(self, d.name .. "  |cff888888(click for profile)|r", {
-				"Status: " .. SF.StatusText(l.s or "?") .. (l.rt and ("  " .. SF.RatingText(l.rt, l.dp)) or ""),
-				l.wp and string.format("%d%% of their play time witnessed", l.wp) or "Witness rating: unknown (older version)",
+				"Status: " .. SF.StatusText(l.s or "?") .. "  |cff888888(their addon's report)|r",
+				string.format("You witnessed %dh of their play", SF.SpanHours(d.rec.hours)),
 				string.format("Level %d, %s played", l.lvl or 0, SF.Duration(l.pl)),
 				string.format("Deaths %d, violations %d, untracked %s", l.d or 0, l.v or 0, SF.Duration(l.g)),
 				{ string.format("Seen %d times; first %s, last %s", d.rec.n or 0, SF.Date(d.rec.first), SF.Ago(d.rec.last)), 0.6, 0.6, 0.6 },
@@ -686,7 +684,14 @@ local function InitWitnessedRow(row, data)
 	row.status:SetText(SF.StatusText(l.s or "?"))
 	row.level:SetText("Lvl " .. (l.lvl or "?"))
 	local summary = SF.WitnessSummary(data.rec)
-	row.flag:SetText(summary and summary.silentN > 0 and "no addon: " .. SF.Duration(summary.silentSecs) or "")
+	row.hours:SetText(summary and summary.hours .. "h" or "")
+	if summary and (summary.sawD or summary.maxV > 0) and l.s ~= "D" then
+		row.flag:SetText(SF.Colorize("saw DQ", SF.COLOR.DISQUALIFIED))
+	elseif summary and summary.silentN > 0 then
+		row.flag:SetText("no addon: " .. SF.Duration(summary.silentSecs))
+	else
+		row.flag:SetText("")
+	end
 	row.seen:SetText(SF.Ago(data.rec.last))
 end
 
@@ -879,10 +884,8 @@ local function BuildWitnesses(page)
 	end)
 	help:SetScript("OnLeave", HideTooltip)
 
-	page.rating = Text(settings, "GameFontNormal", "RIGHT")
-	page.rating:SetPoint("TOPRIGHT", -10, -6)
-	page.coverage = Text(settings, "GameFontDisableSmall", "RIGHT")
-	page.coverage:SetPoint("TOPRIGHT", page.rating, "BOTTOMRIGHT", 0, -2)
+	page.witnessedBy = Text(settings, "GameFontNormal", "RIGHT")
+	page.witnessedBy:SetPoint("TOPRIGHT", -10, -9)
 
 	-- Row 2: settings (progress is always shared: a run that could go quiet
 	-- while breaking a rule would make witnessing meaningless), broadcast.
@@ -959,9 +962,8 @@ function RefreshWitnesses(page)
 	page.mineList:SetList(mine)
 	page.minePanel.title:SetText(string.format("Your witnesses (%d)", #SF.WitnessList()))
 
-	local tier, pct, _, disputes = SF.WitnessRating()
-	page.rating:SetText(SF.RatingText(tier, disputes))
-	page.coverage:SetText(string.format("%d%% of your play time witnessed", pct))
+	local count = SF.WitnessCount()
+	page.witnessedBy:SetText(string.format("Witnessed by %d player%s", count, count == 1 and "" or "s"))
 end
 
 -- ------------------------------ Frame ------------------------------------
@@ -1319,9 +1321,8 @@ SlashCmdList.SELFFOUND = function(msg)
 		UI.ShowProfile(name or SF.playerKey)
 	elseif msg == "status" then
 		local status, reason = SF.GetStatus()
-		local tier, pct, _, disputes = SF.WitnessRating()
-		SF.Print(SF.Colorize(status, StatusColor(status)) .. "  " .. SF.RatingText(tier, disputes) .. " - " .. reason)
-		SF.Print(string.format("%d%% of your play time was witnessed.", pct))
+		SF.Print(SF.Colorize(status, StatusColor(status)) .. " - " .. reason)
+		SF.Print(string.format("Witnessed by %d players. /sf check to see your witnessed hours.", SF.WitnessCount()))
 	elseif msg == "share" or msg == "export" then
 		UI.ShowExport()
 	elseif msg == "verify" then
@@ -1342,9 +1343,9 @@ SlashCmdList.SELFFOUND = function(msg)
 			SF.preview = nil
 			SF.Print("Preview off.")
 		else
-			SF.preview = { disputes = 1 }
+			SF.preview = {}
 			SF.ShowAlert("Preview: Completed a trade with Someone (received 1 copper)")
-			SF.Print("Preview on: showing the disqualification alert and a sample dispute. Nothing is saved or shared. Type /sf preview again (or /reload) to turn it off.")
+			SF.Print("Preview: this is the disqualification alert. Nothing was saved or shared.")
 		end
 		SF.Fire("StatusChanged")
 	else
@@ -1354,7 +1355,7 @@ SlashCmdList.SELFFOUND = function(msg)
 		SF.Print("/sf check <name> - check a player: what you and other witnesses saw")
 		SF.Print("/sf share - share your report   /sf verify - verify someone's report")
 		SF.Print("/sf minimap - show/hide the minimap button")
-		SF.Print("/sf preview - preview the disqualification alert and a dispute (nothing is saved)")
+		SF.Print("/sf preview - preview the disqualification alert (nothing is saved)")
 	end
 end
 
@@ -1365,11 +1366,12 @@ end
 function SelfFound_OnAddonCompartmentEnter(_, button)
 	local owner = button or (AddonCompartmentFrame) or UIParent
 	local status, reason = SF.GetStatus()
-	local rating = ""
-	if SF.run then
-		rating = "  " .. SF.RatingText(select(1, SF.WitnessRating()), select(4, SF.WitnessRating()))
-	end
-	Tooltip(owner, SF.TITLE, { SF.Colorize(status, StatusColor(status)) .. rating, { reason, 0.8, 0.8, 0.8 }, { "Click to open", 0.6, 0.6, 0.6 } })
+	Tooltip(owner, SF.TITLE, {
+		SF.Colorize(status, StatusColor(status)),
+		{ reason, 0.8, 0.8, 0.8 },
+		{ string.format("Witnessed by %d players", SF.WitnessCount()), 0.7, 0.7, 0.7 },
+		{ "Click to open", 0.6, 0.6, 0.6 },
+	})
 end
 
 function SelfFound_OnAddonCompartmentLeave()

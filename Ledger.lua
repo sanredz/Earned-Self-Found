@@ -61,7 +61,7 @@ local function EnsureCounters(run)
 	run.unwatched = run.unwatched or {} -- changes the addon found that happened while it wasn't running
 	run.played = run.played or { tracked = 0, sessions = 0 }
 	run.witnessedBy = run.witnessedBy or {}
-	run.coverage = run.coverage or { last = -1, n = 0 }
+	run.milestones = run.milestones or {} -- ["L20"] / ["D3"] = { names of witnesses who were there }
 	run.logBase = run.logBase or { h = "genesis", n = 0 }
 end
 
@@ -123,9 +123,11 @@ end
 
 -- Appends an event to the chained log. `minor` entries (routine things like
 -- destroyed items) are hidden from the log view by default.
-function SF.Log(kind, text, minor)
+-- `key` links milestone entries (level-ups "L20", deaths "D3") to the
+-- witnesses who saw them (run.milestones); it isn't part of the checksum.
+function SF.Log(kind, text, minor, key)
 	local log = SF.cdb.log
-	local entry = { t = time(), k = kind, m = tostring(text), x = minor and 1 or nil }
+	local entry = { t = time(), k = kind, m = tostring(text), x = minor and 1 or nil, key = key }
 	entry.h = EntryHash(SF.LogHead(), entry)
 	log[#log + 1] = entry
 
@@ -234,26 +236,24 @@ SF.MIN_COVER = 1  -- witnesses needed to recover a gap; more add credibility
 local SEEN_MAX = 10  -- sightings kept per gap
 
 -- Principle: other players can never disqualify you or make you Unverified.
--- What witnesses report is stored per witness and counted (credibility), but
--- only your own addon's observations change your status. Witnesses can only
--- help: enough consistent sightings recover a crash.
+-- Only your own addon's observations change your status. Witnesses can help
+-- (consistent sightings recover a crash), and they can hand back your OWN
+-- addon's words: a token-proven sighting of a disqualification your addon
+-- broadcast before the game closed without saving (see GapSighting).
 
--- Witnesses whose sighting recovers the gap, and witnesses claiming a
--- violation during it (sorted by name). `violations` = how many the run
--- has (defaults to ours; pass a report's count when checking someone else).
+-- Witnesses whose sighting recovers the gap (sorted by name). `violations` =
+-- how many the run has (defaults to ours; pass a report's count when
+-- checking someone else).
 function SF.GapWitnesses(g, violations)
 	violations = violations or #SF.run.violations
-	local support, dispute = {}, {}
+	local support = {}
 	for name, o in pairs(g.seen or {}) do
-		if o.s == "D" or (tonumber(o.v) or 0) > violations then
-			dispute[#dispute + 1] = name
-		elseif g.to and tonumber(o.pl) and g.to - o.pl <= SF.COVER_SLACK then
+		if o.s ~= "D" and (tonumber(o.v) or 0) <= violations and g.to and tonumber(o.pl) and g.to - o.pl <= SF.COVER_SLACK then
 			support[#support + 1] = name
 		end
 	end
 	table.sort(support)
-	table.sort(dispute)
-	return support, dispute
+	return support
 end
 
 -- A witness reports the latest /played it saw from us inside the gap that
@@ -289,6 +289,16 @@ function SF.GapSighting(from, seen, status, violations, witness, token)
 				end
 			end
 			g.seen[witness] = { pl = seen, s = status, v = violations, t = time() }
+
+			-- The token proves OUR addon broadcast this many violations before
+			-- the game closed without saving: they're real, just lost.
+			if violations > #SF.run.violations then
+				while #SF.run.violations < violations do
+					SF.Violation("LOST", string.format("Disqualified before the game closed without saving (%s's addon still had your broadcast)", SF.ShortName(witness)))
+				end
+				SF.Changed()
+				return false
+			end
 
 			local support = SF.GapWitnesses(g)
 			if not g.cov and #support >= SF.MIN_COVER then

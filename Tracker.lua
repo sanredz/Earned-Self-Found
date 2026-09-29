@@ -330,7 +330,7 @@ SF.On("PLAYER_DEAD", function()
 		return
 	end
 	SF.Add("stats", "deaths", 1)
-	SF.Log("death", string.format("Died at level %d in %s", UnitLevel("player") or 0, ZoneName()))
+	SF.Log("death", string.format("Died at level %d in %s", UnitLevel("player") or 0, ZoneName()), false, "D" .. SF.run.stats.deaths)
 	SF.Changed()
 	SF.Fire("Milestone", "death")
 end)
@@ -341,7 +341,7 @@ SF.On("PLAYER_LEVEL_UP", function(level)
 	end
 	level = SF.Safe(level) or UnitLevel("player")
 	SF.Add("stats", "levelUps", 1)
-	SF.Log("level", string.format("Reached level %d after %s played", level, SF.Duration(SF.PlayedNow())))
+	SF.Log("level", string.format("Reached level %d after %s played", level, SF.Duration(SF.PlayedNow())), false, "L" .. level)
 	SF.Changed()
 	SF.Fire("Milestone", "level")
 end)

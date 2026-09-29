@@ -1,8 +1,9 @@
 -- Self Found - Profile window
--- Check any player (or yourself): what their addon says, what YOUR addon
--- recorded of them over time, and - one click - what every other witness
--- in your guild or group recorded. Faking your own addon can't fake the
--- right-hand side of this window.
+-- Check any player (or yourself). Top: what their own addon claims. Middle:
+-- the Witness Record - how many of their played hours other people's addons
+-- can account for, plus flags - computed here from everyone's records, so a
+-- faked addon can't inflate it. Bottom: your own timeline of them, and each
+-- witness who answered.
 
 local ADDON, SF = ...
 
@@ -14,7 +15,8 @@ local Tooltip, HideTooltip, RowHighlight = K.Tooltip, K.HideTooltip, K.RowHighli
 local ORANGE = { 1, 0.6, 0.2 }
 local RED = SF.COLOR.DISQUALIFIED
 local GREEN = SF.COLOR.CLEAN
-local GRAY = SF.COLOR.GRAY
+
+local BAR_WIDTH, BAR_SLOTS = 600, 60
 
 local frame
 local current -- "Name-Realm" being shown
@@ -54,7 +56,7 @@ local function InitTimelineRow(row, e)
 	row.text:SetTextColor(c[1], c[2], c[3])
 end
 
--- Other witnesses' replies: { name, reply }
+-- Other witnesses' replies: { name, reply, hours }
 local function InitOtherRow(row, e)
 	if not row.built then
 		row.built = true
@@ -62,11 +64,14 @@ local function InitOtherRow(row, e)
 		RowHighlight(row)
 		row.name = Text(row, "GameFontHighlight")
 		row.name:SetPoint("LEFT", 6, 0)
-		row.name:SetWidth(110)
+		row.name:SetWidth(100)
 		row.name:SetWordWrap(false)
+		row.hours = Text(row, "GameFontHighlightSmall")
+		row.hours:SetPoint("LEFT", row.name, "RIGHT", 4, 0)
+		row.hours:SetWidth(40)
 		row.status = Text(row, "GameFontHighlightSmall")
-		row.status:SetPoint("LEFT", row.name, "RIGHT", 4, 0)
-		row.status:SetWidth(90)
+		row.status:SetPoint("LEFT", row.hours, "RIGHT", 4, 0)
+		row.status:SetWidth(80)
 		row.flag = Text(row, "GameFontHighlightSmall")
 		row.flag:SetPoint("LEFT", row.status, "RIGHT", 4, 0)
 		row.flag:SetPoint("RIGHT", -6, 0)
@@ -78,16 +83,17 @@ local function InitOtherRow(row, e)
 			end
 			local r = d.reply
 			local lines = {
-				string.format("Recorded %s: %s times, first %s, last %s", SF.ShortName(current), r.n, SF.Date(r.first), SF.Ago(r.last)),
+				string.format("Witnessed %dh of %s's play (heard them %d times)", d.hours, SF.ShortName(current), r.n),
+				string.format("First %s, last %s", SF.Date(r.first), SF.Ago(r.last)),
 				string.format("Last saw: %s, level %d, %s played", SF.StatusText(r.s), r.lvl, SF.Duration(r.pl)),
 			}
 			if r.sawD or r.maxV > 0 then
-				lines[#lines + 1] = { string.format("Saw a disqualification (%d violation%s)", r.maxV, r.maxV == 1 and "" or "s"), RED[1], RED[2], RED[3] }
+				lines[#lines + 1] = { "Saw them disqualified", RED[1], RED[2], RED[3] }
 			end
 			if r.silentN > 0 then
 				lines[#lines + 1] = { string.format("Saw them online without Earned %s (%s total), last %s", Plural(r.silentN, "time"), SF.Duration(r.silentSecs), SF.Ago(r.lastSilent)), ORANGE[1], ORANGE[2], ORANGE[3] }
 			end
-			lines[#lines + 1] = { "Their addon: " .. (r.ver ~= "" and r.ver or "?") .. "   Replied " .. SF.Ago(r.at), 0.6, 0.6, 0.6 }
+			lines[#lines + 1] = { "Click to open " .. SF.ShortName(d.name) .. "'s own profile", 0.6, 0.6, 0.6 }
 			Tooltip(self, SF.ShortName(d.name) .. "'s records", lines)
 		end)
 		row:SetScript("OnLeave", HideTooltip)
@@ -102,13 +108,14 @@ local function InitOtherRow(row, e)
 	local rec = SF.db.witness[e.name]
 	local cr, cg, cb = SF.ClassColor(rec and rec.class)
 	row.name:SetText(SF.Colorize(SF.ShortName(e.name), { cr, cg, cb }))
-	row.status:SetText(SF.StatusText(r.s) .. "  |cff888888x" .. r.n .. "|r")
+	row.hours:SetText(e.hours .. "h")
+	row.status:SetText(SF.StatusText(r.s))
 	if r.sawD or r.maxV > 0 then
 		row.flag:SetText(SF.Colorize("saw DQ", RED))
 	elseif r.silentN > 0 then
 		row.flag:SetText(SF.Colorize("no addon: " .. SF.Duration(r.silentSecs), ORANGE))
 	else
-		row.flag:SetText(SF.Colorize("nothing odd", GREEN))
+		row.flag:SetText("")
 	end
 end
 
@@ -135,12 +142,10 @@ local function Timeline(p)
 	if not rec then
 		return entries
 	end
-	local seen = {}
 	local function AddObs(o)
-		if type(o) ~= "table" or not o.t or seen[o] then
+		if type(o) ~= "table" or not o.t then
 			return
 		end
-		seen[o] = true
 		local color = (o.s == "D" and RED) or (o.s == "U" and SF.COLOR.UNVERIFIED) or nil
 		entries[#entries + 1] = {
 			t = o.t,
@@ -182,10 +187,9 @@ local function MineLines(p)
 		lines[#lines + 1] = color and SF.Colorize(text, color) or text
 	end
 	if p.isSelf then
-		local status, reason = SF.GetStatus()
-		local tier, pct, witnesses, disputes = SF.WitnessRating()
+		local _, reason = SF.GetStatus()
 		Add(reason)
-		Add(string.format("%d%% of your play time witnessed, by %s.", pct, Plural(witnesses, "player")))
+		Add(string.format("Recorded by %s.", Plural(SF.WitnessCount(), "player")))
 		local recovered = SF.RecoveredGaps()
 		if SF.OpenGapTotal() > 0 then
 			Add("Untracked play time: " .. SF.Duration(SF.OpenGapTotal()), SF.COLOR.UNVERIFIED)
@@ -193,47 +197,90 @@ local function MineLines(p)
 		if recovered > 0 then
 			Add(Plural(recovered, "crash") .. " recovered by witnesses", GREEN)
 		end
-		if disputes > 0 then
-			Add(Plural(disputes, "dispute"), ORANGE)
-		end
 		return table.concat(lines, "\n")
 	end
 	local m = p.mine
 	if not m then
-		return "|cff888888You haven't witnessed this player. Ask other witnesses to see what their addons recorded.|r"
+		return "|cff888888You haven't witnessed this player yourself.|r"
 	end
-	Add(string.format("Seen %d times since %s.", m.n, SF.Date(m.first)))
+	Add(string.format("You witnessed %dh of their play, hearing them %d times since %s.", m.hours, m.n, SF.Date(m.first)))
 	Add(string.format("Last heard %s: %s, level %d.", SF.Ago(m.last), SF.StatusText(m.s), m.lvl))
-	if m.sawD or m.maxV > 0 then
-		Add(string.format("You saw them disqualified (%s).", Plural(m.maxV, "violation")), RED)
-	end
 	if m.silentNow then
 		Add("Online without Earned running right now.", ORANGE)
-	end
-	if m.silentN > 0 then
-		Add(string.format("Online without Earned %s, %s in total (last %s).", Plural(m.silentN, "time"), SF.Duration(m.silentSecs), SF.Ago(m.lastSilent)), ORANGE)
-	end
-	if not (m.sawD or m.maxV > 0 or m.silentN > 0 or m.silentNow) then
-		Add("Nothing suspicious in your records.", GREEN)
 	end
 	return table.concat(lines, "\n")
 end
 
-local function OthersLines(p)
-	if not p.asked then
-		return string.format("Ask everyone in your guild and group who runs %s what their addons recorded of %s.",
-			SF.NAME, p.isSelf and "you" or SF.ShortName(p.name))
+-- The record strip: verdict, bar, caption.
+local function ShowRecord(p)
+	local r = p.record
+	local flags = #r.flags
+	local verdict = SF.Colorize(r.label, r.color)
+	if flags > 0 then
+		local red = false
+		for _, f in ipairs(r.flags) do
+			red = red or f.red
+		end
+		verdict = verdict .. "  " .. SF.Colorize("· " .. Plural(flags, "flag"), red and RED or ORANGE)
+	elseif r.contributors > 0 then
+		verdict = verdict .. "  " .. SF.Colorize("· no flags", GREEN)
 	end
-	local a = p.agree
-	local lines = { string.format("Asked %s: %s.", SF.Ago(p.asked), a.total == 0 and "no replies yet" or Plural(a.total, "witness") .. " replied") }
-	if a.total > 0 then
-		lines[#lines + 1] = SF.Colorize(string.format("%d of %d last saw them CLEAN.", a.clean, a.total), a.clean == a.total and GREEN or SF.COLOR.WHITE)
-		if a.sawD > 0 then
-			lines[#lines + 1] = SF.Colorize(string.format("%d saw a disqualification.", a.sawD), RED)
+	frame.verdict:SetText(verdict)
+
+	if r.contributors > 0 then
+		frame.caption:SetText(string.format("%d of %d played hours witnessed by %s%s", r.covered, r.total,
+			Plural(r.contributors, "player"), p.asked and "" or "  |cff888888(your records only; ask witnesses for the full picture)|r"))
+	elseif p.asked then
+		frame.caption:SetText("|cff888888No witness has reported hours for them yet.|r")
+	else
+		frame.caption:SetText(string.format("|cff888888Ask witnesses to see how many of %s played hours other players can account for.|r", p.isSelf and "your" or "their"))
+	end
+
+	-- Bar: their /played from start to now, filled where witnessed.
+	local slots = math.max(1, math.min(BAR_SLOTS, r.total))
+	local width = BAR_WIDTH / slots
+	for i = 1, BAR_SLOTS do
+		local seg = frame.segments[i]
+		if i <= slots then
+			local from = math.floor((i - 1) * r.total / slots)
+			local to = math.max(from, math.floor(i * r.total / slots) - 1)
+			local covered = 0
+			for _, s in ipairs(r.union) do
+				local a, b = math.max(s[1], from), math.min(s[2], to)
+				if b >= a then
+					covered = covered + (b - a + 1)
+				end
+			end
+			local fraction = covered / (to - from + 1)
+			seg:ClearAllPoints()
+			seg:SetPoint("TOPLEFT", frame.bar, "TOPLEFT", (i - 1) * width, 0)
+			seg:SetSize(math.max(1, width - 1), 12)
+			if fraction > 0 then
+				seg:SetColorTexture(GREEN[1], GREEN[2], GREEN[3], 0.35 + 0.65 * fraction)
+			else
+				seg:SetColorTexture(1, 1, 1, 0.08)
+			end
+			seg:Show()
+		else
+			seg:Hide()
 		end
-		if a.silent > 0 then
-			lines[#lines + 1] = SF.Colorize(string.format("%d saw them online without Earned.", a.silent), ORANGE)
+	end
+end
+
+local function OthersLines(p)
+	local lines = {}
+	for i, f in ipairs(p.record.flags) do
+		if i > 4 then
+			lines[#lines + 1] = string.format("|cff888888+%d more flags|r", #p.record.flags - 4)
+			break
 		end
+		lines[#lines + 1] = SF.Colorize(f.who .. " " .. f.text .. (f.t and f.t > 0 and (", " .. SF.Ago(f.t)) or ""), f.red and RED or ORANGE)
+	end
+	if not p.asked then
+		lines[#lines + 1] = string.format("Press Ask witnesses: everyone in your guild and group who runs %s replies with what their addon recorded of %s.",
+			SF.NAME, p.isSelf and "you" or SF.ShortName(p.name))
+	else
+		lines[#lines + 1] = string.format("|cff888888Asked %s: %s.|r", SF.Ago(p.asked), #p.others == 0 and "no replies yet" or Plural(#p.others, "witness") .. " replied")
 	end
 	return table.concat(lines, "\n")
 end
@@ -253,17 +300,18 @@ local function Refresh()
 	frame.name:SetText(SF.Colorize(SF.ShortName(p.name), { r, g, b }))
 	if p.isSelf then
 		local status = SF.GetStatus()
-		local tier, _, _, disputes = SF.WitnessRating()
-		frame.status:SetText(SF.Colorize(status, K.StatusColor(status)) .. "   " .. SF.RatingText(tier, disputes))
+		frame.status:SetText(SF.Colorize(status, K.StatusColor(status)))
 		frame.sub:SetText(string.format("Level %d  |  %s played  |  this is you", UnitLevel("player") or 0, SF.Duration(SF.PlayedNow())))
 	elseif p.rec and p.rec.latest then
 		local l = p.rec.latest
-		frame.status:SetText(SF.StatusText(l.s) .. (l.rt and ("   " .. SF.RatingText(l.rt, l.dp)) or "") .. "  |cff888888(their addon's report)|r")
+		frame.status:SetText(SF.StatusText(l.s) .. "  |cff888888(their addon's report)|r")
 		frame.sub:SetText(string.format("Level %d  |  %s played  |  last heard %s  |  %s %s", l.lvl or 0, SF.Duration(l.pl), SF.Ago(p.rec.last), SF.NAME, l.ver or "?"))
 	else
 		frame.status:SetText("|cff888888No records of this player yet|r")
 		frame.sub:SetText(p.name)
 	end
+
+	ShowRecord(p)
 
 	frame.mineTitle:SetText(p.isSelf and "Your run" or "What you've seen")
 	frame.mineLines:SetText(MineLines(p))
@@ -277,7 +325,7 @@ end
 UI.RefreshProfile = Refresh
 
 local function Build()
-	frame = K.Dialog("SelfFoundProfileFrame", "Player profile", 560)
+	frame = K.Dialog("SelfFoundProfileFrame", "Player profile", 640)
 	frame:SetWidth(680)
 
 	local header = Panel(frame.Inset)
@@ -308,8 +356,35 @@ local function Build()
 	end)
 	frame.ask:SetScript("OnLeave", HideTooltip)
 
+	-- Witness Record strip
+	local record = Panel(frame.Inset, "Witness record")
+	record:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -6)
+	record:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -6)
+	record:SetHeight(92)
+	frame.verdict = Text(record, "GameFontNormalLarge")
+	frame.verdict:SetPoint("TOPLEFT", 16, -36)
+	frame.bar = CreateFrame("Frame", nil, record)
+	frame.bar:SetSize(BAR_WIDTH, 12)
+	frame.bar:SetPoint("TOPLEFT", frame.verdict, "BOTTOMLEFT", 0, -8)
+	frame.segments = {}
+	for i = 1, BAR_SLOTS do
+		frame.segments[i] = frame.bar:CreateTexture(nil, "ARTWORK")
+	end
+	frame.bar:EnableMouse(true)
+	frame.bar:SetScript("OnEnter", function(self)
+		Tooltip(self, "Witnessed hours", {
+			"Their play time from the first hour to now. Filled parts are hours in which at least one other player's addon heard theirs running.",
+			{ "Well witnessed: 75%+ of hours, from 3+ witnesses. Partly: 25%+. Flags are shown separately and never subtracted.", 0.7, 0.7, 0.7 },
+		})
+	end)
+	frame.bar:SetScript("OnLeave", HideTooltip)
+	frame.caption = Text(record, "GameFontHighlightSmall")
+	frame.caption:SetPoint("TOPLEFT", frame.bar, "BOTTOMLEFT", 0, -6)
+	frame.caption:SetPoint("RIGHT", record, "RIGHT", -14, 0)
+	frame.caption:SetWordWrap(false)
+
 	local mine = Panel(frame.Inset, "What you've seen")
-	mine:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -6)
+	mine:SetPoint("TOPLEFT", record, "BOTTOMLEFT", 0, -6)
 	mine:SetPoint("BOTTOMLEFT", 4, 4)
 	mine:SetWidth(330)
 	frame.mineTitle = mine.title
@@ -320,11 +395,11 @@ local function Build()
 	frame.mineLines:SetWordWrap(true)
 	frame.mineLines:SetSpacing(3)
 	local timelineTitle = Text(mine, "GameFontNormalSmall")
-	timelineTitle:SetPoint("TOPLEFT", 14, -126)
+	timelineTitle:SetPoint("TOPLEFT", 14, -104)
 	timelineTitle:SetText("Timeline")
 	frame.timeline = List(mine, 20, InitTimelineRow)
 	frame.timeline:ClearAllPoints()
-	frame.timeline:SetPoint("TOPLEFT", 8, -142)
+	frame.timeline:SetPoint("TOPLEFT", 8, -120)
 	frame.timeline:SetPoint("BOTTOMRIGHT", -24, 8)
 
 	local others = Panel(frame.Inset, "Other witnesses")
@@ -339,7 +414,7 @@ local function Build()
 	frame.othersLines:SetSpacing(3)
 	frame.othersList = List(others, 22, InitOtherRow)
 	frame.othersList:ClearAllPoints()
-	frame.othersList:SetPoint("TOPLEFT", 8, -110)
+	frame.othersList:SetPoint("TOPLEFT", 8, -120)
 	frame.othersList:SetPoint("BOTTOMRIGHT", -24, 8)
 
 	frame:SetScript("OnShow", Refresh)

@@ -31,13 +31,11 @@ local function Split(text, sep)
 end
 
 -- Status, level, played, deaths, violations, untracked seconds, late start,
--- log head, class, quests, session id, addon version, witness rating tier,
--- witnessed %, disputes. Fields may only ever be appended: older versions
--- ignore extra ones.
+-- log head, class, quests, session id, addon version, token. Fields may only
+-- ever be appended: older versions ignore extra ones.
 local function HeartbeatBody()
 	local run = SF.run
 	local _, _, code = SF.GetStatus(true)
-	local tier, pct, _, disputes = SF.WitnessRating(true)
 	local played = math.floor(SF.PlayedNow())
 	return table.concat({
 		code,
@@ -52,9 +50,6 @@ local function HeartbeatBody()
 		run.stats.quests,
 		SF.sessionId or 0,
 		SF.VERSION,
-		tier,
-		pct,
-		disputes,
 		SF.Token(played, code, #run.violations),
 	}, "|")
 end
@@ -80,10 +75,7 @@ local function ParseBody(parts, offset)
 		q = n(10),
 		sid = tonumber(parts[offset + 11]),
 		ver = parts[offset + 12],
-		rt = tonumber(parts[offset + 13]),
-		wp = tonumber(parts[offset + 14]),
-		dp = tonumber(parts[offset + 15]),
-		tk = parts[offset + 16],
+		tk = parts[offset + 13],
 	}
 end
 
@@ -218,7 +210,7 @@ local function Record(sender, obs, viaShared)
 		end
 	end
 	rec.latest = obs
-	SF.Fire("HeardFrom", sender, rec)
+	SF.Fire("HeardFrom", sender, rec, prev)
 	SF.Fire("WitnessChanged")
 end
 
@@ -329,7 +321,6 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 		entry.n = entry.n + 1
 		entry.last = time()
 		SF.run.witnessedBy[sender] = entry
-		SF.MarkWitnessed()
 		SF.Changed()
 		SF.Fire("WitnessChanged")
 	elseif not ackedAt[sender] or time() - ackedAt[sender] > ACK_INTERVAL then
@@ -368,95 +359,6 @@ SF.Listen("Violation", function()
 end)
 
 -- ---------------------------------------------------------------------------
--- Witness rating: soft context next to the (hard) status. How much of your
--- play time other players' addons actually recorded, and by how many
--- different players. Disputes are shown beside it, never subtracted.
--- ---------------------------------------------------------------------------
-
-local WITNESS_BLOCK = 900 -- play time is counted in 15-minute blocks
-
-SF.RATINGS = {
-	[0] = { name = "Unwitnessed", color = { 0.60, 0.60, 0.60 } },
-	[1] = { name = "Lightly witnessed", color = { 0.85, 0.85, 0.85 } },
-	[2] = { name = "Well witnessed", color = { 0.45, 0.75, 1.00 } },
-	[3] = { name = "Heavily witnessed", color = { 1.00, 0.82, 0.00 } },
-}
-
--- Requirements per tier: share of play time witnessed, distinct witnesses.
-local TIERS = { { 75, 5, 3 }, { 40, 3, 2 }, { 10, 1, 1 } }
-
--- A known witness confirmed they recorded our heartbeat just now: the
--- current 15-minute block of play time counts as witnessed.
-function SF.MarkWitnessed()
-	local c = SF.run.coverage
-	local block = math.floor(SF.PlayedNow() / WITNESS_BLOCK)
-	if block > (c.last or -1) then
-		c.last = block
-		c.n = (c.n or 0) + 1
-	end
-end
-
--- Percentage of play time (since tracking started) that was witnessed.
-function SF.WitnessCoverage()
-	local now = SF.PlayedNow()
-	local first = math.floor((SF.run.startPlayed or now) / WITNESS_BLOCK)
-	local blocks = math.max(1, math.floor(now / WITNESS_BLOCK) - first + 1)
-	return math.min(100, math.floor(100 * (SF.run.coverage.n or 0) / blocks))
-end
-
--- Distinct witnesses who claimed a violation during untracked time.
-function SF.DisputeCount()
-	local names = {}
-	for _, g in ipairs(SF.run.gaps) do
-		local _, dispute = SF.GapWitnesses(g)
-		for _, name in ipairs(dispute) do
-			names[name] = true
-		end
-	end
-	local count = 0
-	for _ in pairs(names) do
-		count = count + 1
-	end
-	return count
-end
-
--- Returns tier (0-3), witnessed %, distinct witnesses, disputes.
--- `real` = true for anything shared or exported (heartbeats, reports): it
--- ignores /sf preview's sample data, which is display-only.
-function SF.WitnessRating(real)
-	local pct = SF.WitnessCoverage()
-	local witnesses = 0
-	for _ in pairs(SF.run.witnessedBy) do
-		witnesses = witnesses + 1
-	end
-	local tier = 0
-	for _, t in ipairs(TIERS) do
-		if pct >= t[1] and witnesses >= t[2] then
-			tier = t[3]
-			break
-		end
-	end
-	local disputes = SF.DisputeCount()
-	if not real and SF.preview then
-		disputes = disputes + (SF.preview.disputes or 0)
-	end
-	return tier, pct, witnesses, disputes
-end
-
--- "Well witnessed" (colored), plus "(1 disputed)" if any.
-function SF.RatingText(tier, disputes)
-	local rating = SF.RATINGS[tonumber(tier) or -1]
-	if not rating then
-		return ""
-	end
-	local text = SF.Colorize(rating.name, rating.color)
-	if (tonumber(disputes) or 0) > 0 then
-		text = text .. " " .. SF.Colorize(string.format("(%d disputed)", disputes), { 1, 0.6, 0.2 })
-	end
-	return text
-end
-
--- ---------------------------------------------------------------------------
 -- Tooltip: show the witnessed status of other players (and your own)
 -- ---------------------------------------------------------------------------
 
@@ -475,13 +377,13 @@ local function AddTooltipLine(tooltip)
 		return
 	end
 	-- One fact per line:
-	--   Self Found: CLEAN   (level 12, seen 5m ago)
-	--   Well witnessed
-	--   1 dispute
-	local status, tier, disputes, detail, otherRec
+	--   Self Found: CLEAN   level 12, seen 5m ago     (their addon's claim)
+	--   You witnessed 12h of their play               (your own records)
+	--   You saw them disqualified / online without Earned (flags, if any)
+	local status, detail, otherRec
 	if SF.Safe(UnitIsUnit(unit, "player")) then
 		status = select(3, SF.GetStatus())
-		tier, _, _, disputes = SF.WitnessRating()
+		detail = string.format("|cffaaaaaawitnessed by %d players|r", SF.WitnessCount())
 	else
 		local name, realm = UnitName(unit)
 		name, realm = SF.Safe(name), SF.Safe(realm)
@@ -495,21 +397,19 @@ local function AddTooltipLine(tooltip)
 		end
 		local l = rec.latest
 		otherRec = rec
-		status, tier, disputes = l.s, l.rt, l.dp
+		status = l.s
 		detail = string.format("|cffaaaaaalevel %d, seen %s|r", l.lvl or 0, SF.Ago(rec.last))
 	end
 
 	tooltip:AddLine("Self Found: " .. SF.StatusText(status) .. (detail and ("  " .. detail) or ""))
-	local rating = SF.RATINGS[tonumber(tier) or -1]
-	if rating then
-		tooltip:AddLine(rating.name, rating.color[1], rating.color[2], rating.color[3])
-	end
-	disputes = tonumber(disputes) or 0
-	if disputes > 0 then
-		tooltip:AddLine(string.format("%d dispute%s", disputes, disputes == 1 and "" or "s"), 1, 0.6, 0.2)
-	end
-	-- What *you* saw: online without their addon running.
+	-- What *you* saw of them.
 	local summary = otherRec and SF.WitnessSummary and SF.WitnessSummary(otherRec)
+	if summary and summary.hours > 0 then
+		tooltip:AddLine(string.format("You witnessed %dh of their play", summary.hours), 0.75, 0.75, 0.75)
+	end
+	if summary and (summary.sawD or summary.maxV > 0) and status ~= "D" then
+		tooltip:AddLine("You saw them disqualified before", 1, 0.28, 0.28)
+	end
 	if summary and summary.silentNow then
 		tooltip:AddLine("Online without Earned running right now", 1, 0.6, 0.2)
 	elseif summary and summary.lastSilent and time() - summary.lastSilent < 7 * 86400 then
@@ -547,10 +447,18 @@ function SF.WitnessList()
 	return list
 end
 
+-- How many different players' addons have recorded you.
+function SF.WitnessCount()
+	local count = 0
+	for _ in pairs(SF.run and SF.run.witnessedBy or {}) do
+		count = count + 1
+	end
+	return count
+end
+
 function SF.BuildReport()
 	local run = SF.run
 	local status, reason = SF.GetStatus(true)
-	local rating, witnessedPct, _, disputes = SF.WitnessRating(true)
 	local witnesses = {}
 	for i, w in ipairs(SF.WitnessList()) do
 		if i > 25 then
@@ -584,9 +492,6 @@ function SF.BuildReport()
 		gaps = Copy(run.gaps),
 		gapTotal = SF.GapTotal(),
 		gapOpen = SF.OpenGapTotal(),
-		rating = rating,
-		witnessedPct = witnessedPct,
-		disputes = disputes,
 		logCount = SF.LogCount(),
 		logHead = SF.LogHead(),
 		integrity = SF.integrity.ok and 1 or 0,
@@ -624,14 +529,10 @@ function SF.ReportSummary(report)
 		lines[#lines + 1] = string.format("Untracked play time: %s", SF.Duration(open))
 	end
 	for _, g in ipairs(report.gaps or {}) do
-		local support, dispute = SF.GapWitnesses(g, #report.violations)
+		local support = SF.GapWitnesses(g, #report.violations)
 		if g.cov then
 			lines[#lines + 1] = string.format("  Crash on %s: %s recovered, confirmed by %d witness%s (%s)", SF.Date(g.t), SF.Duration(g.s),
 				#support, #support == 1 and "" or "es", table.concat(support, ", "))
-		end
-		if #dispute > 0 then
-			lines[#lines + 1] = string.format("  %d witness%s claim%s a violation during untracked time on %s (%s)", #dispute,
-				#dispute == 1 and "" or "es", #dispute == 1 and "s" or "", SF.Date(g.t), table.concat(dispute, ", "))
 		end
 	end
 	local names = {}
@@ -642,11 +543,6 @@ function SF.ReportSummary(report)
 		names[#names + 1] = w.name
 	end
 	lines[#lines + 1] = string.format("Witnessed by %d player(s)%s", #(report.witnesses or {}), #names > 0 and (": " .. table.concat(names, ", ")) or "")
-	local rating = SF.RATINGS[tonumber(report.rating) or -1]
-	if rating then
-		lines[#lines + 1] = string.format("Witness rating: %s (%d%% of play time witnessed%s)", rating.name, report.witnessedPct or 0,
-			(report.disputes or 0) > 0 and string.format(", %d disputed", report.disputes) or "")
-	end
 	lines[#lines + 1] = string.format("Generated %s with " .. SF.NAME .. " %s", SF.Date(report.generated), report.addon or "?")
 	return table.concat(lines, "\n")
 end
@@ -724,24 +620,12 @@ function SF.VerifyReport(report)
 		contradictions[#contradictions + 1] = "The addon itself detected that their saved data was edited outside the game."
 	end
 
-	local rating = SF.RATINGS[tonumber(report.rating) or -1]
-	if rating then
-		notes[#notes + 1] = string.format("Witness rating: %s, %d%% of play time witnessed by %d player(s)%s.", rating.name,
-			report.witnessedPct or 0, #(report.witnesses or {}),
-			(report.disputes or 0) > 0 and string.format(", %d disputed", report.disputes) or "")
-	end
-
-	-- Crash recoveries and witness claims: credibility grows with the number
-	-- of witnesses. Claims are shown, never treated as proof on their own.
+	-- Crash recoveries, with the witnesses who confirmed them.
 	for _, g in ipairs(report.gaps or {}) do
-		local support, dispute = SF.GapWitnesses(g, #report.violations)
+		local support = SF.GapWitnesses(g, #report.violations)
 		if g.cov then
 			notes[#notes + 1] = string.format("Crash on %s (%s) recovered, confirmed by %d witness%s: %s.", SF.Date(g.t), SF.Duration(g.s),
 				#support, #support == 1 and "" or "es", table.concat(support, ", "))
-		end
-		if #dispute > 0 then
-			notes[#notes + 1] = string.format("%d witness%s claim%s a violation during untracked time on %s: %s. Ask them to verify too.",
-				#dispute, #dispute == 1 and "" or "es", #dispute == 1 and "s" or "", SF.Date(g.t), table.concat(dispute, ", "))
 		end
 		local mine = g.seen and g.seen[SF.playerKey]
 		if mine then

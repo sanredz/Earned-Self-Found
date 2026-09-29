@@ -38,10 +38,14 @@ First release.
 - Crash recovery: play time lost to a game crash is recovered when witnesses
   heard from the addon right up until the crash. Each recovery lists the
   witnesses who confirmed it.
-- Witness rating (Unwitnessed / Lightly / Well / Heavily witnessed) based on
-  how much of your play time other players' addons recorded, and by how many
-  different players. Disputes are shown beside it. It appears in the window,
-  tooltips, the minimap button and reports.
+- Witness Record: witnesses remember which hours of your played time they
+  heard your addon in. When anyone checks you, all answers are combined into
+  a bar ("36 of 42 played hours witnessed by 27 players"), a plain verdict
+  (Well / Partly / Barely witnessed) and named flags (saw a
+  disqualification, saw you online without Earned). It's calculated by the
+  person checking, never self-reported.
+- Who was there: witnesses tell you when they saw your level-up or death,
+  and your log shows who.
 - Chat-command protection: the addon works on a private copy of its data
   that `/run` can't reach, exposes no global handle, and checks every
   `/played` response. A sealed copy is saved every 15 seconds and on every
@@ -60,10 +64,10 @@ First release.
 - Bank watch: if the bank's contents ever differ from how the addon last saw
   them, the bank was used without the addon, and the run becomes Unverified.
 - Unforgeable sightings: heartbeats carry a token derived from a per-run
-  secret key. Crash recoveries and disputes need a sighting that echoes a
-  real token.
-- `/sf preview` shows the disqualification alert and a sample dispute
-  without saving or sharing anything.
+  secret key. Crash recoveries need a sighting that echoes a real token. A
+  token-proven disqualification that was lost to a crash is restored.
+- `/sf preview` shows the disqualification alert without saving or sharing
+  anything.
 - Griefing protection: other players can never disqualify you or make you
   Unverified. Witness claims are recorded by name and shown in Verify with how
   many witnesses back them. Messages from players outside your guild or group
