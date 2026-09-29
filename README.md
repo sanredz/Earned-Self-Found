@@ -184,10 +184,11 @@ profile, the lists and their tooltip.
 The game only saves addon data when you log out or `/reload`, so a hard crash
 loses the play time since then, which on its own makes a run Unverified. But
 witnesses heard from your addon every minute:
-- After a crash, your addon asks them when they last heard from you.
-- If it was right up until the crash (within about 90 seconds of play time),
-  it was a crash and not play without the addon, and the run stays
-  **CLEAN**.
+- After a crash, your addon asks them when they last heard from you. It
+  keeps asking for **7 days**, whenever you're both online.
+- If one heard from you right up until the crash, it was a crash and not
+  play without the addon, and the run is restored to **CLEAN**.
+- If no witness confirms it within 7 days, the run stays Unverified.
 - Each recovery lists the witnesses who confirmed it.
 
 ### Who was there
