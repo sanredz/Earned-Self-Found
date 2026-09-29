@@ -60,7 +60,7 @@ run, and lets other players vouch for it.
 - Bidding on, buying out or listing an auction.
 - Taking items or gold (including COD) from mail sent by another player. Your
   own returned mail, NPC mail and auction house mail are fine.
-- Withdrawing items or gold from a guild bank or Warband bank.
+- Withdrawing items or gold from a guild bank.
 - Editing the addon's saved data outside the game.
 
 A warning appears before you can break a rule by accident:
