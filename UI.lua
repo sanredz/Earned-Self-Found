@@ -643,23 +643,32 @@ local function InitWitnessedRow(row, data)
 		RowHighlight(row)
 		row.name = Text(row, "GameFontHighlight")
 		row.name:SetPoint("LEFT", 6, 0)
-		row.name:SetWidth(150)
+		row.name:SetWidth(130)
 		row.name:SetWordWrap(false)
 		row.status = Text(row, "GameFontHighlightSmall")
 		row.status:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
-		row.status:SetWidth(100)
+		row.status:SetWidth(90)
 		row.level = Text(row, "GameFontHighlightSmall")
 		row.level:SetPoint("LEFT", row.status, "RIGHT", 4, 0)
-		row.level:SetWidth(50)
+		row.level:SetWidth(45)
+		row.flag = Text(row, "GameFontHighlightSmall")
+		row.flag:SetPoint("LEFT", row.level, "RIGHT", 4, 0)
+		row.flag:SetWidth(90)
+		row.flag:SetTextColor(1, 0.6, 0.2)
 		row.seen = Text(row, "GameFontDisableSmall", "RIGHT")
 		row.seen:SetPoint("RIGHT", -6, 0)
+		row:SetScript("OnClick", function(self)
+			if self.data then
+				UI.ShowProfile(self.data.name)
+			end
+		end)
 		row:SetScript("OnEnter", function(self)
 			local d = self.data
 			if not d then
 				return
 			end
 			local l = d.rec.latest or {}
-			Tooltip(self, d.name, {
+			Tooltip(self, d.name .. "  |cff888888(click for profile)|r", {
 				"Status: " .. SF.StatusText(l.s or "?") .. (l.rt and ("  " .. SF.RatingText(l.rt, l.dp)) or ""),
 				l.wp and string.format("%d%% of their play time witnessed", l.wp) or "Witness rating: unknown (older version)",
 				string.format("Level %d, %s played", l.lvl or 0, SF.Duration(l.pl)),
@@ -676,6 +685,8 @@ local function InitWitnessedRow(row, data)
 	row.name:SetText(SF.Colorize(SF.ShortName(data.name), { r, g, b }))
 	row.status:SetText(SF.StatusText(l.s or "?"))
 	row.level:SetText("Lvl " .. (l.lvl or "?"))
+	local summary = SF.WitnessSummary(data.rec)
+	row.flag:SetText(summary and summary.silentN > 0 and "no addon: " .. SF.Duration(summary.silentSecs) or "")
 	row.seen:SetText(SF.Ago(data.rec.last))
 end
 
@@ -690,10 +701,15 @@ local function InitWitnessRow(row, data)
 		row.name:SetWordWrap(false)
 		row.count = Text(row, "GameFontDisableSmall", "RIGHT")
 		row.count:SetPoint("RIGHT", -6, 0)
+		row:SetScript("OnClick", function(self)
+			if self.data then
+				UI.ShowProfile(self.data.name)
+			end
+		end)
 		row:SetScript("OnEnter", function(self)
 			local d = self.data
 			if d then
-				Tooltip(self, d.name, { string.format("Recorded your run %d times.", d.n), "Last: " .. SF.Ago(d.last) })
+				Tooltip(self, d.name .. "  |cff888888(click for profile)|r", { string.format("Recorded your run %d times.", d.n), "Last: " .. SF.Ago(d.last) })
 			end
 		end)
 		row:SetScript("OnLeave", HideTooltip)
@@ -703,41 +719,198 @@ local function InitWitnessRow(row, data)
 	row.count:SetText("x" .. data.n)
 end
 
+local RefreshWitnesses -- defined below; the search box refreshes the lists
+
+local WITNESS_HELP = {
+	{ "Everyone running " .. SF.NAME .. " in your guild or group automatically tells each other's addons how their run is going, every minute. Each addon keeps what it saw.", 1, 1, 1 },
+	{ " " },
+	{ "Players you've witnessed: players your addon has recorded.", 0.8, 0.8, 0.8 },
+	{ "Your witnesses: players whose addon has recorded you.", 0.8, 0.8, 0.8 },
+	{ " " },
+	{ "Why it matters: your own saved data lives on your computer, but these records live on other people's computers, so they can't be faked or erased. Click any player (or search) to see everything recorded about them, and ask other witnesses what they saw.", 0.8, 0.8, 0.8 },
+	{ " " },
+	{ "Witnesses also recover crashes, and notice when someone is online without " .. SF.NAME .. " running.", 0.6, 0.6, 0.6 },
+}
+
+-- Search box with a suggestion dropdown: find any player you know (or type
+-- any name) and open their profile.
+local function BuildPlayerSearch(parent, onChanged)
+	local box = CreateFrame("EditBox", nil, parent, "SearchBoxTemplate")
+	box:SetSize(220, 20)
+	box:SetAutoFocus(false)
+	if box.Instructions then
+		box.Instructions:SetText("Check a player...")
+	end
+
+	local drop = CreateFrame("Frame", nil, box, "BackdropTemplate")
+	drop:SetPoint("TOPLEFT", box, "BOTTOMLEFT", -6, -2)
+	drop:SetWidth(250)
+	drop:SetFrameStrata("DIALOG")
+	if drop.SetBackdrop then
+		drop:SetBackdrop({
+			bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			edgeSize = 14,
+			insets = { left = 3, right = 3, top = 3, bottom = 3 },
+		})
+		drop:SetBackdropColor(0.08, 0.08, 0.08, 0.96)
+	end
+	drop:Hide()
+	drop.buttons = {}
+	local MAX = 8
+
+	local function Open(name)
+		box:SetText("")
+		box:ClearFocus()
+		drop:Hide()
+		if name then
+			UI.ShowProfile(name)
+		end
+	end
+
+	for i = 1, MAX do
+		local b = CreateFrame("Button", nil, drop)
+		b:SetHeight(20)
+		b:SetPoint("TOPLEFT", 6, -6 - (i - 1) * 20)
+		b:SetPoint("RIGHT", -6, 0)
+		RowHighlight(b)
+		b.text = Text(b, "GameFontHighlightSmall")
+		b.text:SetPoint("LEFT", 4, 0)
+		b.text:SetPoint("RIGHT", -60, 0)
+		b.text:SetWordWrap(false)
+		b.info = Text(b, "GameFontDisableSmall", "RIGHT")
+		b.info:SetPoint("RIGHT", -4, 0)
+		b:SetScript("OnClick", function(self)
+			Open(self.target)
+		end)
+		drop.buttons[i] = b
+	end
+
+	local function Suggest()
+		local text = (box:GetText() or ""):match("^%s*(.-)%s*$")
+		drop.first = nil
+		if text == "" then
+			drop:Hide()
+			return
+		end
+		local needle = text:lower()
+		local shown = 0
+		for _, entry in ipairs(SF.KnownPlayers()) do
+			if shown >= MAX - 1 then
+				break
+			end
+			if SF.ShortName(entry.name):lower():find(needle, 1, true) then
+				shown = shown + 1
+				local b = drop.buttons[shown]
+				local rec = SF.db.witness[entry.name]
+				local r, g, bl = SF.ClassColor(rec and rec.class)
+				b.target = entry.name
+				b.text:SetText(SF.Colorize(SF.ShortName(entry.name), { r, g, bl }))
+				b.info:SetText(rec and rec.latest and SF.StatusText(rec.latest.s) or "|cff888888witness|r")
+				b:Show()
+				drop.first = drop.first or entry.name
+			end
+		end
+		-- Any name can be checked, even one you've never seen.
+		local typed = SF.ResolveName(text)
+		if typed and not (drop.first and SF.ShortName(drop.first):lower() == needle) then
+			shown = shown + 1
+			local b = drop.buttons[shown]
+			b.target = typed
+			b.text:SetText(string.format("Check |cffffd100%s|r", SF.ShortName(typed)))
+			b.info:SetText("")
+			b:Show()
+			drop.first = drop.first or typed
+		end
+		for i = shown + 1, MAX do
+			drop.buttons[i]:Hide()
+		end
+		drop:SetHeight(12 + shown * 20)
+		drop:SetShown(shown > 0)
+	end
+
+	box:HookScript("OnTextChanged", function(self)
+		Suggest()
+		if onChanged then
+			onChanged((self:GetText() or ""):match("^%s*(.-)%s*$"):lower())
+		end
+	end)
+	box:HookScript("OnEnterPressed", function()
+		Open(drop.first)
+	end)
+	box:HookScript("OnEditFocusLost", function()
+		-- Let a click on a suggestion land first.
+		SF.After(0.2, function()
+			drop:Hide()
+		end)
+	end)
+	box:HookScript("OnEditFocusGained", Suggest)
+	return box
+end
+
 local function BuildWitnesses(page)
 	local settings = CreateFrame("Frame", nil, page)
 	settings:SetPoint("TOPLEFT", 4, -2)
 	settings:SetPoint("TOPRIGHT", -4, -2)
-	settings:SetHeight(54)
-	-- Progress is always shared (no opt-out): a run that could go quiet
-	-- while breaking a rule would make witnessing meaningless.
-	local tooltips = Checkbox(settings, "Show self-found status in player tooltips", function()
+	settings:SetHeight(58)
+
+	-- Row 1: find players, your own profile, help; your rating on the right.
+	page.search = BuildPlayerSearch(settings, function(filter)
+		page.filter = filter
+		RefreshWitnesses(page)
+	end)
+	page.search:SetPoint("TOPLEFT", 12, -6)
+	local me = Button(settings, "My profile", 100, function()
+		UI.ShowProfile(SF.playerKey)
+	end)
+	me:SetHeight(22)
+	me:SetPoint("LEFT", page.search, "RIGHT", 10, 0)
+	me:SetScript("OnEnter", function(self)
+		Tooltip(self, "My profile", { "See your run the way others can check it, and ask your witnesses what their addons recorded of you." })
+	end)
+	me:SetScript("OnLeave", HideTooltip)
+	local help = CreateFrame("Button", nil, settings)
+	help:SetSize(20, 20)
+	help:SetPoint("LEFT", me, "RIGHT", 6, 0)
+	help:SetNormalTexture("Interface\\FriendsFrame\\InformationIcon")
+	help:SetHighlightTexture("Interface\\FriendsFrame\\InformationIcon", "ADD")
+	help:SetScript("OnEnter", function(self)
+		Tooltip(self, "How witnesses work", WITNESS_HELP)
+	end)
+	help:SetScript("OnLeave", HideTooltip)
+
+	page.rating = Text(settings, "GameFontNormal", "RIGHT")
+	page.rating:SetPoint("TOPRIGHT", -10, -6)
+	page.coverage = Text(settings, "GameFontDisableSmall", "RIGHT")
+	page.coverage:SetPoint("TOPRIGHT", page.rating, "BOTTOMRIGHT", 0, -2)
+
+	-- Row 2: settings (progress is always shared: a run that could go quiet
+	-- while breaking a rule would make witnessing meaningless), broadcast.
+	local tooltips = Checkbox(settings, "Status in player tooltips", function()
 		return SF.settings.tooltips
 	end, function(v)
 		SF.settings.tooltips = v
 	end)
-	tooltips:SetPoint("TOPLEFT", 4, -2)
-	local warnings = Checkbox(settings, "Warn me when a trade, auction, or mail window opens", function()
+	tooltips:SetPoint("TOPLEFT", 4, -32)
+	local warnings = Checkbox(settings, "Warn at trade, auction and mail windows", function()
 		return SF.settings.warnings
 	end, function(v)
 		SF.settings.warnings = v
 	end)
-	warnings:SetPoint("TOPLEFT", 4, -26)
-	local now = Button(settings, "Broadcast now", 130, function()
+	warnings:SetPoint("TOPLEFT", 200, -32)
+	local now = Button(settings, "Broadcast now", 120, function()
 		SF.Broadcast(true)
 		SF.Print("Sent your progress to guild and group members running " .. SF.NAME .. ".")
 	end)
-	now:SetPoint("TOPRIGHT", -8, -14)
+	now:SetHeight(22)
+	now:SetPoint("TOPRIGHT", -8, -34)
 	now:SetScript("OnEnter", function(self)
 		Tooltip(self, "Broadcast now", { "Your progress is shared automatically every minute with guild and group members running " .. SF.NAME .. ".", "Use this to share it right away, e.g. after joining a group." })
 	end)
 	now:SetScript("OnLeave", HideTooltip)
-	page.rating = Text(settings, "GameFontNormal", "RIGHT")
-	page.rating:SetPoint("BOTTOMRIGHT", now, "BOTTOMLEFT", -14, 13)
-	page.coverage = Text(settings, "GameFontDisableSmall", "RIGHT")
-	page.coverage:SetPoint("TOPRIGHT", page.rating, "BOTTOMRIGHT", 0, -3)
 
 	local seen = Panel(page, "Players you've witnessed")
-	seen:SetPoint("TOPLEFT", 4, -58)
+	seen:SetPoint("TOPLEFT", 4, -62)
 	seen:SetPoint("BOTTOMLEFT", 4, 4)
 	seen:SetWidth(444)
 	page.seenPanel = seen
@@ -756,23 +929,35 @@ local function BuildWitnesses(page)
 	page.empty:SetText("No one yet. When guild or group members also run " .. SF.NAME .. ", you'll automatically record each other's progress here.")
 end
 
-local function RefreshWitnesses(page)
-	local seen = {}
+function RefreshWitnesses(page)
+	local filter = page.filter ~= "" and page.filter or nil
+	local function Matches(name)
+		return not filter or SF.ShortName(name):lower():find(filter, 1, true) ~= nil
+	end
+	local seen, total = {}, 0
 	for name, rec in pairs(SF.db.witness) do
 		if type(rec) == "table" and rec.latest then
-			seen[#seen + 1] = { name = name, rec = rec }
+			total = total + 1
+			if Matches(name) then
+				seen[#seen + 1] = { name = name, rec = rec }
+			end
 		end
 	end
 	table.sort(seen, function(a, b)
 		return (a.rec.last or 0) > (b.rec.last or 0)
 	end)
 	page.seenList:SetList(seen)
-	page.seenPanel.title:SetText(string.format("Players you've witnessed (%d)", #seen))
-	page.empty:SetShown(#seen == 0)
+	page.seenPanel.title:SetText(string.format("Players you've witnessed (%d)", total))
+	page.empty:SetShown(total == 0)
 
-	local mine = SF.WitnessList()
+	local mine = {}
+	for _, w in ipairs(SF.WitnessList()) do
+		if Matches(w.name) then
+			mine[#mine + 1] = w
+		end
+	end
 	page.mineList:SetList(mine)
-	page.minePanel.title:SetText(string.format("Your witnesses (%d)", #mine))
+	page.minePanel.title:SetText(string.format("Your witnesses (%d)", #SF.WitnessList()))
 
 	local tier, pct, _, disputes = SF.WitnessRating()
 	page.rating:SetText(SF.RatingText(tier, disputes))
@@ -987,6 +1172,13 @@ local function TextArea(parent, width, height)
 	return scroll
 end
 
+-- Shared widget helpers for other UI files (ProfileUI.lua).
+UI.Kit = {
+	Text = Text, Icon = Icon, Panel = Panel, Button = Button, List = List,
+	Tooltip = Tooltip, HideTooltip = HideTooltip, RowHighlight = RowHighlight,
+	Number = Number, Dialog = Dialog, StatusColor = StatusColor,
+}
+
 local exportFrame
 
 function UI.ShowExport()
@@ -1079,13 +1271,24 @@ function UI.ShowVerify()
 			end
 			local contradictions, notes = SF.VerifyReport(report)
 			verifyFrame.result:SetText(FormatVerification(report, contradictions, notes))
+			verifyFrame.target = report.char
+			verifyFrame.profile:SetShown(report.char ~= nil)
 		end)
 		check:SetPoint("TOPLEFT", verifyFrame.area, "BOTTOMLEFT", -4, -10)
 		local clear = Button(verifyFrame.Inset, "Clear", 90, function()
 			verifyFrame.area.EditBox:SetText("")
 			verifyFrame.result:SetText("")
+			verifyFrame.profile:Hide()
 		end)
 		clear:SetPoint("LEFT", check, "RIGHT", 8, 0)
+		-- Cross-check with everyone else's records of this player, too.
+		verifyFrame.profile = Button(verifyFrame.Inset, "Ask other witnesses", 170, function()
+			if verifyFrame.target then
+				UI.ShowProfile(verifyFrame.target, true)
+			end
+		end)
+		verifyFrame.profile:SetPoint("LEFT", clear, "RIGHT", 8, 0)
+		verifyFrame.profile:Hide()
 		local panel = Panel(verifyFrame.Inset, "Result")
 		panel:SetPoint("TOPLEFT", check, "BOTTOMLEFT", 0, -8)
 		panel:SetPoint("BOTTOMRIGHT", -8, 8)
@@ -1107,9 +1310,13 @@ end
 SLASH_SELFFOUND1 = "/selffound"
 SLASH_SELFFOUND2 = "/sf"
 SlashCmdList.SELFFOUND = function(msg)
-	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+	local raw = (msg or ""):match("^%s*(.-)%s*$")
+	msg = raw:lower()
 	if msg == "" then
 		UI.Toggle()
+	elseif msg == "check" or msg:match("^check ") then
+		local name = SF.ResolveName(raw:match("^%S+%s+(.+)$") or "")
+		UI.ShowProfile(name or SF.playerKey)
 	elseif msg == "status" then
 		local status, reason = SF.GetStatus()
 		local tier, pct, _, disputes = SF.WitnessRating()
@@ -1128,12 +1335,6 @@ SlashCmdList.SELFFOUND = function(msg)
 	elseif msg == "broadcast" then
 		SF.Broadcast(true)
 		SF.Print("Sent your progress to guild and group members running " .. SF.NAME .. ".")
-	elseif msg == "preview clean" then
-		-- TEMPORARY screenshot helper (remove before release): shows CLEAN and
-		-- Heavily witnessed in the UI only; heartbeats/reports stay real.
-		SF.preview = not (SF.preview and SF.preview.clean) and { clean = true } or nil
-		SF.Print(SF.preview and "Clean preview on (display only). Type /sf preview clean again or /reload to turn it off." or "Preview off.")
-		SF.Fire("StatusChanged")
 	elseif msg == "preview" then
 		-- Display-only samples (for screenshots/testing): never saved, never
 		-- sent to other players, gone after /reload.
@@ -1150,6 +1351,7 @@ SlashCmdList.SELFFOUND = function(msg)
 		SF.Print(string.format("%s %s - official download: %s", SF.TITLE, SF.VERSION, SF.WEBSITE))
 		SF.Print("/sf - open the window")
 		SF.Print("/sf status - print your run status")
+		SF.Print("/sf check <name> - check a player: what you and other witnesses saw")
 		SF.Print("/sf share - share your report   /sf verify - verify someone's report")
 		SF.Print("/sf minimap - show/hide the minimap button")
 		SF.Print("/sf preview - preview the disqualification alert and a dispute (nothing is saved)")

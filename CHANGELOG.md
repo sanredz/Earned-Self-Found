@@ -50,6 +50,13 @@ First release.
   server keeps the character in the world) is forgiven when gold, level, XP,
   bags and gear are unchanged. Untracked time where the character did change
   counts even when it's short.
+- Player profiles: search for any player (with suggestions) or click one to
+  see what your addon recorded over time, and ask every other witness in
+  your guild and group what theirs recorded. Also `/sf check <name>` and "My
+  profile".
+- Online without Earned: witnesses record when a player known to run the
+  addon is online but their addon sends nothing for 5 minutes. It's shown in
+  profiles, the witness list and tooltips.
 - Bank watch: if the bank's contents ever differ from how the addon last saw
   them, the bank was used without the addon, and the run becomes Unverified.
 - Unforgeable sightings: heartbeats carry a token derived from a per-run

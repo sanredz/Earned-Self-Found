@@ -18,5 +18,7 @@ Ledger.lua
 Tracker.lua
 Rules.lua
 Witness.lua
+Profiles.lua
 UI.lua
+ProfileUI.lua
 Minimap.lua

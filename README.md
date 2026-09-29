@@ -33,6 +33,11 @@ run, and lets other players vouch for it.
   can't quietly go dark. Only your status, level, played time, deaths, quest
   count, class and number of violations are shared, and only with guild and
   group members running the addon.
+- **Check any player:** search for a player (or click one) to see everything
+  your addon recorded of them, and ask every other witness in your guild and
+  group what theirs recorded.
+- **Online without Earned:** if someone who runs the addon is online but
+  their addon goes quiet, witnesses notice and record it.
 - **Share and verify:** export a report anyone can paste into Verify, which
   checks it against their own witness records.
 
@@ -79,24 +84,59 @@ short** when the character changed in it. Your bank is checked too: it can
 only change while it's open, so if it ever differs from how the addon last
 saw it, the run becomes Unverified.
 
-### Crashes: recovered by witnesses
+## Witnesses: how other players vouch for you
 
-The game only saves addon data when you log out or `/reload`, so a hard crash
-loses the play time since then. On its own, that makes a run Unverified.
+Your own saved data lives on your computer, so on its own it proves little.
+Witnesses fix that. It's all automatic:
 
-If guild or group members running Earned were online, it's recovered:
-- Your addon tells them where you are every minute.
-- After a crash, it asks them when they last heard from you.
-- If a witness heard from you right up until the crash (within about 90
-  seconds of play time), it was a crash and not play without the addon. The
-  run stays **CLEAN**.
+1. Everyone running Earned in your **guild or group** sends a tiny, invisible
+   status update every minute: status, level, played time, deaths.
+2. Each addon keeps what it heard. **Players you've witnessed** are the ones
+   your addon recorded. **Your witnesses** are the ones whose addons recorded
+   you.
+3. Those records sit on *other people's* computers, so nobody can fake or
+   erase what their witnesses saw.
 
-Each recovery lists the witnesses who confirmed it, and more witnesses means
-more credibility.
+Sharing is always on, so a run can't quietly go dark. Only status, level,
+played time, deaths, quest count, class and number of violations are shared,
+and only with guild and group members running the addon.
 
 **Join a guild made for Earned and self-found players.** More witnesses
 online means crashes get recovered, and your run is vouched for by more
 people.
+
+### Checking a player
+
+Open the **Witnesses** tab and type a name in the search box (suggestions
+appear as you type), click any player in the lists, or use `/sf check <name>`.
+The profile shows:
+- **What their addon says:** status and witness rating.
+- **What you've seen:** a timeline of every status you recorded, and any
+  time they were online without Earned running.
+- **Other witnesses:** click **Ask witnesses**, and everyone in your guild
+  and group who runs Earned replies with what their addon recorded, e.g.
+  "5 of 5 last saw them CLEAN" or "1 saw a disqualification".
+
+A player can fake their own addon, but not what everyone else's recorded.
+Use **My profile** to see what others recorded of you.
+
+### Online without Earned
+
+A disabled addon can't warn anyone itself, but its silence is the signal. If
+someone known to run Earned is online in your guild or group and their addon
+sends nothing for 5 minutes, your addon records it. It's shown in their
+profile, the lists and their tooltip.
+
+### Crashes are recovered
+
+The game only saves addon data when you log out or `/reload`, so a hard crash
+loses the play time since then, which on its own makes a run Unverified. But
+witnesses heard from your addon every minute:
+- After a crash, your addon asks them when they last heard from you.
+- If it was right up until the crash (within about 90 seconds of play time),
+  it was a crash and not play without the addon, and the run stays
+  **CLEAN**.
+- Each recovery lists the witnesses who confirmed it.
 
 ### Witness rating
 
@@ -110,28 +150,22 @@ run, e.g. **CLEAN · Well witnessed**:
 | Well witnessed | 40%+ | 3+ |
 | Heavily witnessed | 75%+ | 5+ |
 
-- Play time counts as witnessed when another player's addon confirms it
-  recorded you.
-- If witnesses ever claimed they saw you break a rule, it shows next to the
-  rating as "(1 disputed)". It's never subtracted or enforced.
-- The rating appears in the window, on the minimap button, in player tooltips
-  and in shared reports.
+If a witness ever proved you broadcast a disqualification before a crash,
+it shows next to the rating as "(1 disputed)". It's never enforced
+automatically.
 
-### Other players can't grief you
+### Nobody can grief you
 
 - Your status is only ever changed by **your own addon seeing your own
-  actions**.
-- Other players' addons can help recover a crash, but can never disqualify
-  you or make you Unverified.
+  actions**. Other players can help recover a crash, but can never
+  disqualify you or make you Unverified.
 - Messages only count on the channels they're really sent on, and only from
   players seen in your guild or group.
-- Every heartbeat carries a token made from a secret key that never leaves
-  your computer. A witness's sighting only counts if it echoes the exact token
-  of a heartbeat you really sent, so nobody can make one up, whether to fake
-  your crash recovery or to accuse you.
-- A witness who proves you broadcast a disqualification before a crash is
-  recorded under their name and shown in Verify. It's never enforced
-  automatically.
+- Every status update carries a token made from a secret key that never
+  leaves your computer. Crash sightings must echo a real token, so nobody can
+  make one up.
+- What witnesses tell you when you ask about a player is shown with their
+  names and counts ("4 of 5…"), as information, never as a verdict.
 
 ## Install
 
@@ -150,6 +184,7 @@ run, e.g. **CLEAN · Well witnessed**:
 | `/sf status` | Print your run status |
 | `/sf share` | Export your report |
 | `/sf verify` | Verify someone else's report |
+| `/sf check <name>` | Open a player's profile (just `/sf check` for your own) |
 | `/sf minimap` | Show or hide the minimap button |
 | `/sf broadcast` | Send your status to guild and group now |
 | `/sf preview` | Preview the disqualification alert and a sample dispute. Nothing is saved or shared; type it again or `/reload` to turn it off. |
@@ -166,7 +201,7 @@ their code and saved data sit on the player's computer. Earned makes cheating
   commands (`/run`) can't reach. Every 15 seconds it saves a sealed copy, so
   a disconnect loses almost nothing, and chat edits to that copy are either
   overwritten or caught as tampering.
-- Your status is sent to witnesses about a second after a violation. Those
+- Your status is sent to witnesses the moment a violation happens. Those
   records live on *their* computers, so deleting or editing your own data
   doesn't erase what they saw.
 - Play time is compared against the server's `/played`, so time played with
@@ -184,8 +219,10 @@ Core.lua             Namespace, events, formatting, serializer and checksum
 Ledger.lua           Saved run data, the chained log, seal and run status
 Tracker.lua          Gold, items, kills, quests, deaths, play time, net worth
 Rules.lua            Disqualification rules, alerts and warning banners
-Witness.lua          Heartbeats between players, reports and verification
+Witness.lua          Heartbeats between players, crash recovery, rating, reports
+Profiles.lua         "Online without Earned" detection, asking other witnesses
 UI.lua               Main window, dialogs, slash commands
+ProfileUI.lua        Player profile window
 Minimap.lua          Minimap button
 tests/               Test harness (Lua VM in Node with stubbed WoW APIs)
 scripts/             Dev helpers

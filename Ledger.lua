@@ -330,10 +330,6 @@ function SF.GetStatus(real)
 	if not run then
 		return "UNVERIFIED", "Loading...", "U"
 	end
-	-- TEMPORARY (screenshot helper, remove before release): /sf preview clean
-	if not real and SF.preview and SF.preview.clean then
-		return "CLEAN", "No trades, auctions, or player mail, and all play time accounted for.", "C"
-	end
 	if #run.violations > 0 then
 		local first = run.violations[1]
 		local reason = first.m

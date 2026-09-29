@@ -228,7 +228,7 @@ local function InstallStubs()
 	_G.C_ChatInfo = {
 		SendAddonMessage = function(prefix, msg, channel, target) table.insert(W.sent, { prefix, msg, channel, target }) end,
 		RegisterAddonMessagePrefix = function() return true end,
-		InChatMessagingLockdown = function() return false end,
+		InChatMessagingLockdown = function() return W.lockdown == true end,
 	}
 	_G.Enum = {
 		PlayerInteractionType = { TradePartner = 1, QuestGiver = 4, Merchant = 5, TaxiNode = 6, Trainer = 7, Banker = 8, GuildBanker = 10, Vendor = 12, MailInfo = 17, Auctioneer = 21 },
@@ -264,6 +264,12 @@ local function InstallStubs()
 	W.bags = W.bags or { [0] = { [1] = { "|Hitem:2589::|h[Linen Cloth]|h", 5 } } }
 	_G.GetInventoryItemLink = function() return nil end
 	_G.GetInventoryItemID = function() return nil end
+	W.roster = W.roster or {}
+	_G.GetNumGuildMembers = function() return #W.roster end
+	_G.GetGuildRosterInfo = function(i) local m = W.roster[i]; if m then return m.name, "Member", 1, 10, "Warrior", "Elwynn", "", "", m.online end end
+	_G.C_GuildInfo = { GuildRoster = function() end }
+	_G.UnitExists = function() return false end
+	_G.UnitIsConnected = function() return true end
 	_G.UnitXP = function() return W.xp or 0 end
 	_G.C_AuctionHouse = {
 		PlaceBid = function() end,
@@ -1047,19 +1053,6 @@ do
 	Boot(saved, { played = ServerPlayed() })
 	check(type(SF.cdb.key) == "string" and SF.cdb.key == SelfFoundCharDB.key, "secret key kept across sessions")
 
-	-- TEMPORARY /sf preview clean: display only, never shared
-	SlashCmdList.SELFFOUND("preview clean")
-	check(SF.GetStatus() == "CLEAN" and SF.WitnessRating() == 3, "clean preview shows CLEAN + Heavily witnessed")
-	check(SF.GetStatus(true) == "DISQUALIFIED" and SF.BuildReport().status == "DISQUALIFIED" and SF.BuildReport().rating == 0, "clean preview never reaches reports")
-	W.sent = {}
-	SF.Broadcast(true)
-	check(W.sent[1] and W.sent[1][2]:match("^H1|D|"), "clean preview never reaches heartbeats")
-	SlashCmdList.SELFFOUND("")
-	for i = 1, 4 do SF.UI.SelectTab(i) end
-	check(#W.errors == 0, "clean preview UI runs", W.errors[1])
-	SlashCmdList.SELFFOUND("preview clean")
-	check(SF.preview == nil and SF.GetStatus() == "DISQUALIFIED", "clean preview toggles off")
-
 	SelfFoundCharDB.run.violations = {}   -- /run SelfFoundCharDB.run.violations = {}
 	SelfFoundCharDB.run.gaps = {}
 	SelfFoundCharDB.log = {}
@@ -1192,6 +1185,146 @@ do
 		Fire("TIME_PLAYED_MSG", ServerPlayed(), ServerPlayed())
 	end
 	check(#SF.run.gaps == 0 and SF.GetStatus() == "CLEAN", "normal /played during play doesn't create gaps")
+end
+
+-- ---------------------------------------------------------------------------
+-- 11. Profiles: silence detection, asking witnesses, the profile window
+-- ---------------------------------------------------------------------------
+
+Fresh()
+do
+	local function Beat(who)
+		Fire("CHAT_MSG_ADDON", "SelfFound", "H1|C|12|5000|0|0|0|0|abcd1234|ROGUE|3|7|1.0.0|1|30|0|tk", "GUILD", who)
+	end
+	local function Online(name, online)
+		for _, m in ipairs(W.roster) do
+			if m.name == name then m.online = online return end
+		end
+		table.insert(W.roster, { name = name, online = online })
+	end
+
+	-- Silence: Gus runs Earned (known), is online, but his addon goes quiet
+	Beat("Gus")
+	Online("Gus-TestRealm", true)
+	local gus = SelfFoundDB.witness["Gus-TestRealm"]
+	Advance(250)
+	check(not gus.silentOpen, "no silence judged before we've listened for 5 minutes")
+	Advance(200)
+	check(gus.silentOpen ~= nil and SF.WitnessSummary(gus).silentNow, "online 5+ minutes without a heartbeat => online without Earned")
+	Beat("Gus")
+	check(not gus.silentOpen and gus.silentN == 1 and gus.silent[1].t > gus.silent[1].f, "heartbeat ends the silent period (recorded with duration)")
+
+	-- Heartbeats keep coming: never silent
+	for _ = 1, 10 do
+		Advance(60)
+		Beat("Gus")
+	end
+	check(gus.silentN == 1 and not gus.silentOpen, "regular heartbeats never count as silence")
+
+	-- Silent, then goes offline: period closes where we last saw them
+	Advance(400)
+	check(gus.silentOpen ~= nil, "silent again")
+	Online("Gus-TestRealm", false)
+	Advance(60)
+	check(not gus.silentOpen and gus.silentN == 2, "going offline closes the period")
+
+	-- Our own messaging lockdown: silence can't be judged
+	Online("Gus-TestRealm", true)
+	W.lockdown = true
+	Advance(600)
+	check(not gus.silentOpen, "no silence judged while our messaging is locked down")
+	W.lockdown = false
+	Beat("Gus")
+
+	-- Players who never ran Earned aren't flagged
+	Online("Nobody-TestRealm", true)
+	Advance(600)
+	check(SelfFoundDB.witness["Nobody-TestRealm"] == nil, "non-Earned players are never flagged")
+
+	-- Tooltip shows what you saw
+	local lines = {}
+	local tip = NewMock("GameTooltip")
+	tip.GetUnit = function() return "Gus", "mouseover" end
+	tip.AddLine = function(_, text) lines[#lines + 1] = text end
+	local realTooltip, realUnitName = _G.GameTooltip, _G.UnitName
+	_G.GameTooltip = tip
+	_G.UnitName = function(u) if u == "player" then return "Tester" end return "Gus" end
+	W.tooltipPost(tip)
+	_G.GameTooltip, _G.UnitName = realTooltip, realUnitName
+	check(table.concat(lines, " / "):find("without Earned", 1, true), "tooltip warns about time online without Earned", table.concat(lines, " / "))
+
+	-- Asking witnesses: answering others
+	Beat("Carl")
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Gus-TestRealm", "GUILD", "Carl")
+	local reply = W.sent[1]
+	check(reply and reply[3] == "WHISPER" and reply[4] == "Carl-TestRealm" and reply[2]:match("^W1|Gus%-TestRealm|%d+|"), "answers a question about a player we witnessed", reply and reply[2])
+	local fields = {}
+	for f in ((reply and reply[2] or "") .. "|"):gmatch("(.-)|") do fields[#fields + 1] = f end
+	check(tonumber(fields[11]) and tonumber(fields[11]) >= 2 and tonumber(fields[12]) > 0, "reply includes the silent periods", reply and reply[2])
+	W.sent = {}
+	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Gus-TestRealm", "GUILD", "Carl")
+	check(#W.sent == 0, "repeat questions throttled")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Nobody-TestRealm", "GUILD", "Dana")
+	check(#W.sent == 0, "no answer without records")
+	Fire("CHAT_MSG_ADDON", "SelfFound", "Q1|Gus-TestRealm", "WHISPER", "Dana")
+	check(#W.sent == 0, "questions only accepted from guild/group channels")
+
+	-- Asking witnesses: our question and their replies
+	check(SF.AskWitnesses("Gus-TestRealm"), "ask sends a question")
+	check(W.sent[1] and W.sent[1][2] == "Q1|Gus-TestRealm" and W.sent[1][3] == "GUILD", "question goes to guild")
+	check(not SF.AskWitnesses("Gus-TestRealm"), "own questions throttled")
+	local function W1(from, target, s, sawD, silentN, channel)
+		Fire("CHAT_MSG_ADDON", "SelfFound", string.format("W1|%s|40|%d|%d|%s|12|5000|%d|%d|%d|600|%d|1.0.0", target, time() - 9000, time() - 60, s, sawD, sawD, silentN, time() - 100), channel or "WHISPER", from)
+	end
+	W1("Carl", "Gus-TestRealm", "C", 0, 0)
+	Beat("Dana")
+	W1("Dana", "Gus-TestRealm", "D", 1, 1)
+	W1("Stranger", "Gus-TestRealm", "C", 0, 0)
+	W1("Gus", "Gus-TestRealm", "C", 0, 0)
+	W1("Carl", "Else-TestRealm", "C", 0, 0)
+	W1("Dana", "Gus-TestRealm", "C", 0, 0, "GUILD")
+	local p = SF.Profile("Gus-TestRealm")
+	check(p.agree.total == 2 and p.agree.clean == 1 and p.agree.sawD == 1 and p.agree.silent == 1, "replies from known witnesses counted", p.agree.total)
+	check(p.others[1] and SF.queries["Gus-TestRealm"].replies["Stranger-TestRealm"] == nil, "strangers' replies ignored")
+	check(SF.queries["Gus-TestRealm"].replies["Gus-TestRealm"] == nil, "nobody vouches for themselves")
+	check(SF.queries["Else-TestRealm"] == nil, "replies to questions we never asked are ignored")
+	Advance(200)
+	W1("Erin", "Gus-TestRealm", "C", 0, 0)
+	check(SF.queries["Gus-TestRealm"].replies["Erin-TestRealm"] == nil, "late replies ignored")
+
+	-- Names
+	check(SF.ResolveName("gus") == "Gus-TestRealm" and SF.ResolveName("zed") == "Zed-TestRealm" and SF.ResolveName("tester") == SF.playerKey, "typed names resolve (case-insensitive)")
+
+	-- Profile window, search, clicks, /sf check
+	SlashCmdList.SELFFOUND("check gus")
+	check(SelfFoundProfileFrame and SelfFoundProfileFrame:IsShown(), "/sf check opens the profile window")
+	SF.UI.ShowProfile(SF.playerKey)
+	SF.UI.ShowProfile("Zed-TestRealm", true)
+	SlashCmdList.SELFFOUND("")
+	SF.UI.SelectTab(4)
+	local search
+	for _, m in ipairs(allMocks) do
+		if m.__kind == "EditBox" and m.__scripts.OnTextChanged then search = m end
+	end
+	check(search ~= nil, "search box exists")
+	search:SetText("gu")
+	search.__scripts.OnTextChanged(search, true)
+	search.__scripts.OnEnterPressed(search)
+	check(SelfFoundProfileFrame:IsShown(), "search + Enter opens a profile")
+	for _, m in ipairs(allMocks) do
+		if m.__scripts.OnEnter then m.__scripts.OnEnter(m) end
+		if m.__scripts.OnLeave then m.__scripts.OnLeave(m) end
+	end
+	for _, m in ipairs(allMocks) do
+		if m.__kind == "row" and m.__scripts.OnClick then m.__scripts.OnClick(m) end
+	end
+	check(#W.errors == 0, "profile UI paths run without errors", W.errors[1])
+
+	-- Survives saving (no frames or functions in saved data)
+	local saved = Logout()
+	Boot(saved, { played = ServerPlayed() })
+	check(SelfFoundDB.witness["Gus-TestRealm"].silentN >= 2 and not SelfFoundDB.witness["Gus-TestRealm"].silentOpen, "silent periods saved (open one closed at logout)")
 end
 
 print(string.format("\n%d passed, %d failed, %d errors", pass, fail, #W.errors))

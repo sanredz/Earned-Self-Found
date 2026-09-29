@@ -91,16 +91,20 @@ local function CanSend()
 	if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then
 		return false
 	end
-	if C_ChatInfo.InChatMessagingLockdown and SF.Safe(SF.Try(C_ChatInfo.InChatMessagingLockdown)) then
-		return false
-	end
-	return true
+	return not SF.InMessagingLockdown()
 end
 
 local function Send(message, channel, target)
 	if CanSend() then
 		pcall(C_ChatInfo.SendAddonMessage, SF.PREFIX, message, channel, target)
 	end
+end
+SF.Send = Send
+
+-- True while this client may not send addon messages (e.g. restricted
+-- encounters), so silence from others can't be judged either.
+function SF.InMessagingLockdown()
+	return C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and SF.Safe(SF.Try(C_ChatInfo.InChatMessagingLockdown)) == true
 end
 
 -- Guild, plus raid or party if grouped.
@@ -115,6 +119,8 @@ local function SendToWitnesses(message)
 		Send(message, "PARTY")
 	end
 end
+
+SF.SendToWitnesses = SendToWitnesses
 
 local lastBroadcast, lastRecall = -math.huge, -math.huge
 
@@ -155,6 +161,12 @@ end
 
 local ackedAt = {}
 
+-- Stored copies of older heartbeats keep only what the timeline, Verify
+-- and crash recovery use (saved-data size: records are kept for good).
+local function Slim(obs)
+	return { s = obs.s, lvl = obs.lvl, pl = obs.pl, d = obs.d, v = obs.v, g = obs.g, t = obs.t, tk = obs.tk }
+end
+
 local function Record(sender, obs, viaShared)
 	local witness = SF.db.witness
 	local rec = witness[sender]
@@ -183,7 +195,7 @@ local function Record(sender, obs, viaShared)
 		end
 		if newSession then
 			rec.ends = rec.ends or {}
-			table.insert(rec.ends, prev)
+			table.insert(rec.ends, Slim(prev))
 			-- Every /reload or relog is a session, so keep them by age (the
 			-- recall window is 7 days), with a hard cap for saved-data size.
 			while #rec.ends > 0 and obs.t - (rec.ends[1].t or 0) > ENDS_MAX_AGE do
@@ -200,14 +212,20 @@ local function Record(sender, obs, viaShared)
 	local changed = not prev or prev.s ~= obs.s or prev.lvl ~= obs.lvl or prev.d ~= obs.d
 		or prev.v ~= obs.v or prev.g ~= obs.g or (obs.pl - (prev.pl or 0)) >= 1800
 	if changed then
-		table.insert(rec.history, obs)
+		table.insert(rec.history, Slim(obs))
 		while #rec.history > HISTORY_MAX do
 			table.remove(rec.history, 1)
 		end
 	end
 	rec.latest = obs
+	SF.Fire("HeardFrom", sender, rec)
 	SF.Fire("WitnessChanged")
 end
+
+-- Extra message kinds (other modules): SF.MessageHandlers[kind] =
+-- function(sender, parts, channel, known, shared). Each handler must enforce
+-- its own channel/known-sender rules (see the anti-griefing note below).
+SF.MessageHandlers = {}
 
 -- Someone asks what we last saw of them inside their gap (from, to]. Answer
 -- with the latest heartbeat we have in that range, if any.
@@ -292,6 +310,10 @@ SF.On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
 			return
 		end
 	else
+		local handler = SF.MessageHandlers[kind]
+		if handler then
+			handler(sender, parts, channel, known, shared)
+		end
 		return
 	end
 
@@ -402,10 +424,6 @@ end
 -- `real` = true for anything shared or exported (heartbeats, reports): it
 -- ignores /sf preview's sample data, which is display-only.
 function SF.WitnessRating(real)
-	-- TEMPORARY (screenshot helper, remove before release): /sf preview clean
-	if not real and SF.preview and SF.preview.clean then
-		return 3, 92, 7, 0
-	end
 	local pct = SF.WitnessCoverage()
 	local witnesses = 0
 	for _ in pairs(SF.run.witnessedBy) do
@@ -460,7 +478,7 @@ local function AddTooltipLine(tooltip)
 	--   Self Found: CLEAN   (level 12, seen 5m ago)
 	--   Well witnessed
 	--   1 dispute
-	local status, tier, disputes, detail
+	local status, tier, disputes, detail, otherRec
 	if SF.Safe(UnitIsUnit(unit, "player")) then
 		status = select(3, SF.GetStatus())
 		tier, _, _, disputes = SF.WitnessRating()
@@ -476,6 +494,7 @@ local function AddTooltipLine(tooltip)
 			return
 		end
 		local l = rec.latest
+		otherRec = rec
 		status, tier, disputes = l.s, l.rt, l.dp
 		detail = string.format("|cffaaaaaalevel %d, seen %s|r", l.lvl or 0, SF.Ago(rec.last))
 	end
@@ -488,6 +507,13 @@ local function AddTooltipLine(tooltip)
 	disputes = tonumber(disputes) or 0
 	if disputes > 0 then
 		tooltip:AddLine(string.format("%d dispute%s", disputes, disputes == 1 and "" or "s"), 1, 0.6, 0.2)
+	end
+	-- What *you* saw: online without their addon running.
+	local summary = otherRec and SF.WitnessSummary and SF.WitnessSummary(otherRec)
+	if summary and summary.silentNow then
+		tooltip:AddLine("Online without Earned running right now", 1, 0.6, 0.2)
+	elseif summary and summary.lastSilent and time() - summary.lastSilent < 7 * 86400 then
+		tooltip:AddLine(string.format("Seen online without Earned: %s (%s)", SF.Duration(summary.silentSecs), SF.Ago(summary.lastSilent)), 1, 0.6, 0.2)
 	end
 	tooltip:Show()
 end
