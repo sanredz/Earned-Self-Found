@@ -58,6 +58,7 @@ local function EnsureCounters(run)
 	end
 	run.violations = run.violations or {}
 	run.gaps = run.gaps or {}
+	run.unwatched = run.unwatched or {} -- changes the addon found that happened while it wasn't running
 	run.played = run.played or { tracked = 0, sessions = 0 }
 	run.witnessedBy = run.witnessedBy or {}
 	run.coverage = run.coverage or { last = -1, n = 0 }
@@ -344,6 +345,9 @@ function SF.GetStatus(real)
 	local reasons = {}
 	if run.lateStart then
 		reasons[#reasons + 1] = string.format("Tracking started at level %d with %s already played", run.lateStart.level or 0, SF.Duration(run.lateStart.played))
+	end
+	if #run.unwatched > 0 then
+		reasons[#reasons + 1] = "Your bank changed while the addon wasn't running"
 	end
 	local open = SF.OpenGapTotal()
 	if open > 0 then

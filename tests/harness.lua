@@ -254,7 +254,7 @@ local function InstallStubs()
 		GetContainerNumSlots = function(bag) return W.bags[bag] and 16 or 0 end,
 		GetContainerItemInfo = function(bag, slot)
 			local item = W.bags[bag] and W.bags[bag][slot]
-			if item then return { hyperlink = item[1], stackCount = item[2], hasNoValue = false } end
+			if item then return { hyperlink = item[1], stackCount = item[2], hasNoValue = false, itemID = tonumber(item[1]:match("item:(%d+)")) } end
 		end,
 		UseContainerItem = function() end,
 		PickupContainerItem = function() end,
@@ -1115,6 +1115,62 @@ do
 	Advance(400)                          -- too long to be a linger, even if idle
 	Boot(saved, { played = ServerPlayed() })
 	check(SF.GetStatus() == "UNVERIFIED", "long gap is never forgiven")
+
+	-- Short gaps: below the old 45s tolerance, a changed character still counts
+	Fresh()
+	Advance(100)
+	saved = Logout()
+	Advance(25)                           -- a quick session without the addon...
+	W.money = W.money + 5000              -- ...taking a pre-arranged trade
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "UNVERIFIED", "25s gap with changed gold counts")
+	Fresh()
+	Advance(100)
+	saved = Logout()
+	Advance(25)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN" and #SF.run.gaps == 0, "25s gap with nothing changed is ignored")
+
+	-- Looting right before a disconnect: saved within ~1s, so still forgiven
+	Fresh()
+	Advance(102)                          -- just after a regular 15s save (ticks at 15, 30, ... 105)
+	W.money = W.money + 50
+	Fire("PLAYER_MONEY")
+	Advance(2)                            -- only the ~1s save-on-change can capture this
+	saved = Disconnect()
+	Advance(60)
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN", "change just before a disconnect doesn't block the grace", select(2, SF.GetStatus()))
+
+	-- Bank watch
+	Fresh()
+	_G.BANK_CONTAINER = -1
+	W.bags[-1] = { [1] = { "|Hitem:2589::|h[Linen Cloth]|h", 10 } }
+	local function OpenBank() Fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 8); Advance(6) end
+	local function CloseBank() Fire("PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 8); Advance(1) end
+	OpenBank()
+	check(SF.run.bank and SF.run.bank.n == 1, "bank remembered on first visit")
+	W.bags[-1][2] = { "|Hitem:117::|h[Tough Jerky]|h", 5 } -- deposit while the addon watches
+	Fire("BAG_UPDATE_DELAYED")
+	CloseBank()
+	Advance(30)
+	saved = Logout()
+	Boot(saved, { played = ServerPlayed() })
+	OpenBank()
+	check(SF.GetStatus() == "CLEAN" and #SF.run.unwatched == 0, "own bank changes with the addon running are fine")
+	W.bags[-1][1], W.bags[-1][3] = nil, { "|Hitem:2589::|h[Linen Cloth]|h", 10 } -- sorting moved a stack
+	Fire("BAG_UPDATE_DELAYED")
+	CloseBank()
+	Advance(30)
+	saved = Logout()
+	W.bags[-1][4] = { "|Hitem:6948::|h[Hearthstone]|h", 1 } -- stashed while the addon was off
+	Boot(saved, { played = ServerPlayed() })
+	check(SF.GetStatus() == "CLEAN", "bank change isn't visible until the bank is opened")
+	OpenBank()
+	check(SF.GetStatus() == "UNVERIFIED" and select(2, SF.GetStatus()):find("bank changed", 1, true), "bank changed while the addon was off => UNVERIFIED", select(2, SF.GetStatus()))
+	CloseBank()
+	W.bags[-1] = nil
+	_G.BANK_CONTAINER = nil
 
 	-- Faking the first /played response to hide time played without the addon
 	Fresh()

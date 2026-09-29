@@ -10,6 +10,7 @@ local GAP_TOLERANCE = 45       -- seconds of unexplained /played drift we ignore
 local LATE_START_PLAYED = 300  -- runs started after this much /played are Unverified
 local TRACK_INTERVAL = 15
 local IDLE_GRACE = 180         -- max untracked seconds forgiven after a disconnect if nothing changed
+local GAP_NOISE = 10           -- below this, login/logout timing noise; above it, a changed character counts
 
 -- ---------------------------------------------------------------------------
 -- Which NPC/UI interaction is open. Used to attribute gold changes, and by
@@ -394,6 +395,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local sampleAt
+local loginSnap
 local awaitingPlayed = false
 local mutedFrames = {}
 
@@ -508,12 +510,22 @@ SF.On("TIME_PLAYED_MSG", function(total)
 			local from = played.server + (played.tracked or 0)
 			local to = total - loadTime
 			local gap = to - from
-			if gap >= GAP_TOLERANCE then
+			-- Compare the character with how we last saved it (gold, level,
+			-- XP, bags, gear). Taken right after entering the world, before
+			-- the player can act.
+			local now = loginSnap or SF.Snapshot()
+			local unchanged = played.snap ~= nil and played.snap == now
+			local changed = played.snap ~= nil and not unchanged
+			if changed and gap >= GAP_NOISE then
+				-- Something happened while the addon wasn't looking: even a
+				-- short gap counts (e.g. a quick trade with the addon off).
+				SF.AddGap(gap, "the character changed while the addon wasn't running", from, to)
+			elseif gap >= GAP_TOLERANCE then
 				-- After a disconnect the server keeps the character in the
 				-- world for a while, and /played keeps counting. If the gap is
-				-- short and the character is exactly as we last saved it (gold,
-				-- level, XP, bags, gear), nothing happened: forgive it.
-				if gap <= IDLE_GRACE and played.snap and played.snap == SF.Snapshot() then
+				-- short and the character is exactly as we saved it, nothing
+				-- happened: forgive it.
+				if unchanged and gap <= IDLE_GRACE then
 					SF.Log("info", string.format("%s of idle time after a disconnect (nothing about the character changed)", SF.Duration(gap)))
 				else
 					SF.AddGap(gap, "the addon didn't see it: a crash, or played without the addon", from, to)
@@ -548,6 +560,13 @@ end)
 SF.On("PLAYER_ENTERING_WORLD", function(isInitialLogin, isReloadingUi)
 	lastMoney = SF.Safe(GetMoney())
 	if isInitialLogin or isReloadingUi or not sampleAt then
+		-- Fingerprint the character before the player can do anything, for
+		-- the gap check when /played arrives.
+		SF.After(1, function()
+			if not sampleAt then
+				loginSnap = SF.Snapshot()
+			end
+		end)
 		SF.After(3, RequestPlayed)
 	end
 	SF.QueueWorth()
@@ -560,6 +579,23 @@ SF.Listen("Ready", function()
 		end)
 	end
 end)
+
+-- Save again ~1s after anything the fingerprint covers changes, so what's
+-- on disk (e.g. at a disconnect) matches the character almost exactly.
+local saveQueued = false
+local function QueueSave()
+	if saveQueued or not sampleAt then
+		return
+	end
+	saveQueued = true
+	SF.After(1, function()
+		saveQueued = false
+		UpdateTracked()
+	end)
+end
+for _, event in ipairs({ "PLAYER_MONEY", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_XP_UPDATE", "PLAYER_LEVEL_UP" }) do
+	SF.On(event, QueueSave)
+end
 
 SF.Listen("BeforeSave", UpdateTracked)
 
@@ -740,5 +776,119 @@ end
 SF.Listen("InteractionOpened", function(kind)
 	if kind == "bank" then
 		SF.QueueWorth(0.3)
+	end
+end)
+
+-- ---------------------------------------------------------------------------
+-- Bank watch. The bank can only change while it's open, so if it's ever
+-- different from how the addon last saw it, it was changed while the addon
+-- wasn't running - e.g. a trade stashed in the bank during a short session
+-- without the addon. Slot positions are ignored (sorting is harmless).
+-- ---------------------------------------------------------------------------
+
+-- Returns a fingerprint of the character bank's contents and its item count,
+-- or nil if the bank can't be read right now.
+function SF.BankSnapshot()
+	local getInfo = C_Container and C_Container.GetContainerItemInfo
+	local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+	local counts, slots, items = {}, 0, 0
+	for _, bag in ipairs(SF.BankBagIDs("character")) do
+		local n = SF.Safe(SF.Try(numSlots, bag)) or 0
+		slots = slots + n
+		for slot = 1, n do
+			local info = getInfo and SF.Try(getInfo, bag, slot)
+			if type(info) == "table" and not SF.IsSecret(info) then
+				local id = SF.Safe(info.itemID)
+				if id then
+					counts[id] = (counts[id] or 0) + (SF.Safe(info.stackCount) or 1)
+					items = items + 1
+				end
+			end
+		end
+	end
+	if slots == 0 then
+		return nil
+	end
+	local ids = {}
+	for id in pairs(counts) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	local parts = {}
+	for _, id in ipairs(ids) do
+		parts[#parts + 1] = id .. "x" .. counts[id]
+	end
+	return SF.Hash(table.concat(parts, ",")), items
+end
+
+local bankChecked = false
+local BANK_CHECK_DELAYS = { 0.5, 1.5, 4 } -- retries while the bank's contents arrive
+
+local function RememberBank()
+	local sig, items = SF.BankSnapshot()
+	if sig and SF.run and (not SF.run.bank or SF.run.bank.sig ~= sig) then
+		SF.run.bank = { sig = sig, n = items, t = time() }
+		SF.Changed()
+	end
+end
+
+local function CheckBank(attempt)
+	if bankChecked or not SF.run or not SF.IsOpen("bank") then
+		return
+	end
+	local sig, items = SF.BankSnapshot()
+	local known = SF.run.bank
+	if sig and (not known or known.sig == sig) then
+		bankChecked = true
+		RememberBank()
+		return
+	end
+	if attempt < #BANK_CHECK_DELAYS then
+		SF.After(BANK_CHECK_DELAYS[attempt + 1], function()
+			CheckBank(attempt + 1)
+		end)
+		return
+	end
+	if sig then
+		bankChecked = true
+		table.insert(SF.run.unwatched, { t = time(), k = "bank" })
+		SF.Log("gap", "Your bank changed while the addon wasn't running (it was played without the addon)")
+		SF.run.bank = { sig = sig, n = items, t = time() }
+		SF.Changed()
+		SF.Fire("StatusChanged")
+	end
+end
+
+SF.Listen("InteractionOpened", function(kind)
+	if kind == "bank" then
+		bankChecked = false
+		SF.After(BANK_CHECK_DELAYS[1], function()
+			CheckBank(1)
+		end)
+	end
+end)
+
+-- While the bank is open (and verified), follow the player's own changes.
+for _, event in ipairs({ "BAG_UPDATE_DELAYED", "PLAYERBANKSLOTS_CHANGED" }) do
+	SF.On(event, function()
+		if bankChecked and SF.IsOpen("bank") then
+			RememberBank()
+		end
+	end)
+end
+
+-- A change confirmed just after closing (e.g. a deposit whose update arrives
+-- late) is still captured if the bank is readable; otherwise nothing is
+-- recorded (never an empty snapshot).
+SF.Listen("InteractionClosed", function(kind)
+	if kind == "bank" and bankChecked then
+		SF.After(0.5, function()
+			local sig, items = SF.BankSnapshot()
+			local known = SF.run and SF.run.bank
+			if sig and not (items == 0 and known and (known.n or 0) > 0) then
+				RememberBank()
+			end
+			bankChecked = false
+		end)
 	end
 end)

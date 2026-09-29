@@ -74,6 +74,11 @@ short while, and `/played` keeps counting. That idle time (up to 3 minutes)
 is forgiven if your character is exactly as it was: same gold, level, XP,
 bags and gear. It's noted in the log.
 
+The other way around, time the addon didn't see counts **even if it's
+short** when the character changed in it. Your bank is checked too: it can
+only change while it's open, so if it ever differs from how the addon last
+saw it, the run becomes Unverified.
+
 ### Crashes: recovered by witnesses
 
 The game only saves addon data when you log out or `/reload`, so a hard crash

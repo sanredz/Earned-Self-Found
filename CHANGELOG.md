@@ -48,7 +48,10 @@ First release.
   violation, so disconnects lose almost nothing.
 - Disconnects: idle time after a disconnect (up to 3 minutes, while the
   server keeps the character in the world) is forgiven when gold, level, XP,
-  bags and gear are unchanged.
+  bags and gear are unchanged. Untracked time where the character did change
+  counts even when it's short.
+- Bank watch: if the bank's contents ever differ from how the addon last saw
+  them, the bank was used without the addon, and the run becomes Unverified.
 - Unforgeable sightings: heartbeats carry a token derived from a per-run
   secret key. Crash recoveries and disputes need a sighting that echoes a
   real token.
