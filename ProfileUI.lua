@@ -449,15 +449,10 @@ local function Build()
 	frame.shared = shared
 	frame.sharedText = Text(shared, "GameFontHighlightSmall")
 	frame.sharedText:SetPoint("TOPLEFT", 14, -34)
-	frame.sharedText:SetPoint("RIGHT", shared, "RIGHT", -110, 0)
+	frame.sharedText:SetPoint("RIGHT", shared, "RIGHT", -14, 0)
 	frame.sharedText:SetJustifyV("TOP")
 	frame.sharedText:SetWordWrap(true)
 	frame.sharedText:SetSpacing(3)
-	local dismiss = Button(shared, "Dismiss", 90, function()
-		sharedRuns[current] = nil
-		Refresh()
-	end)
-	dismiss:SetPoint("TOPRIGHT", -12, -6)
 
 	local mine = Panel(frame.Inset, "What you've seen")
 	frame.mine = mine
@@ -495,6 +490,10 @@ local function Build()
 	frame.othersList:SetPoint("BOTTOMRIGHT", -24, 8)
 
 	frame:SetScript("OnShow", Refresh)
+	-- A checked shared run stays while the window is open, then it's gone.
+	frame:HookScript("OnHide", function()
+		sharedRuns = {}
+	end)
 end
 
 -- Opens the profile of `name` ("Name-Realm", or a short name you know).
