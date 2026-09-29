@@ -33,6 +33,11 @@ run, and lets other players vouch for it.
 - **Share and verify:** export a report anyone can paste into Verify, which
   checks it against their own witness records.
 
+<p>
+  <img src="media/log.png" alt="Event log tab" width="49%">
+  <img src="media/witnesses.png" alt="Witnesses tab" width="49%">
+</p>
+
 ## Rules
 
 **Disqualifies the run:**
