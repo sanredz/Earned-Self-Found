@@ -21,7 +21,7 @@ run, and lets other players vouch for it.
   the minimap button, and in player tooltips.
 - **Rule enforcement:** breaking a rule disqualifies the run immediately, with
   an on-screen alert. A warning banner appears whenever a trade, auction, mail
-  or bank window is open.
+  or guild bank window is open.
 - **Gold ledger:** income by source (looted gold, quests, vendor sales, mail
   and auctions) and spending by category (vendors, repairs, training, flights,
   fees).
